@@ -1,9 +1,13 @@
 #include "HAL.h"
 
 __attribute__((aligned(4))) uint32_t MEM_BUF[BLE_MEMHEAP_SIZE / 4]; // try to get rid of this
-
+uint32_t g_LLE_IRQLibHandlerLocation;
 volatile uint8_t tx_end_flag = 0;
 rfConfig_t rf_Config = {0};
+
+void Lib_Calibration_LSI(void) {
+	Calibration_LSI(Level_64);
+}
 
 __HIGH_CODE
 __attribute__((noinline))
@@ -43,9 +47,14 @@ int main(void) {
 	PWR_DCDCCfg(ENABLE);
 	SetSysClock(CLK_SOURCE_PLL_60MHz);
 	GPIOA_ModeCfg(GPIO_Pin_8, GPIO_ModeOut_PP_5mA);
-	CH59x_BLEInit();
 	HAL_TimeInit();
 	HAL_SleepInit();
+
+	g_LLE_IRQLibHandlerLocation = (uint32_t)LLE_IRQLibHandler;
+	bleConfig_t blecfg = {0};
+	blecfg.MEMAddr = (uint32_t)MEM_BUF;
+	blecfg.MEMLen = (uint32_t)BLE_MEMHEAP_SIZE;
+	BLE_LibInit(&blecfg);
 	RF_RoleInit();
 
 	rf_Config.accessAddress = 0x8E89BED6;

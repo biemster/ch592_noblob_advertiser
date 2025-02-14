@@ -11,7 +11,6 @@ APP_C_SRCS = \
 
 
 SDK_BLE_HAL_C_SRCS = \
-  ./sdk/BLE/HAL/MCU.c \
   ./sdk/BLE/HAL/RTC.c \
   ./sdk/BLE/HAL/SLEEP.c
 
