@@ -156,7 +156,7 @@ obj/%.o: ./%.S
 	    -o "$@" "$<"
 
 f: clean all
-	chprog main.bin
+	chprog ${SECONDARY_BIN}
 
 flash: 
-	chprog main.bin
+	chprog ${SECONDARY_BIN}

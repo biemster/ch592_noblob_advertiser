@@ -44,7 +44,8 @@ int main(void) {
 	SetSysClock(CLK_SOURCE_PLL_60MHz);
 	GPIOA_ModeCfg(GPIO_Pin_8, GPIO_ModeOut_PP_5mA);
 	CH59x_BLEInit();
-	HAL_Init();
+	HAL_TimeInit();
+	HAL_SleepInit();
 	RF_RoleInit();
 
 	rf_Config.accessAddress = 0x8E89BED6;
