@@ -50,7 +50,7 @@ int main(void) {
 	rf_Config.accessAddress = 0x8E89BED6;
 	rf_Config.CRCInit = 0x555555;
 	rf_Config.LLEMode = LLE_MODE_BASIC;
-    rf_Config.rfStatusCB = RF_2G4StatusCallBack;
+	rf_Config.rfStatusCB = RF_2G4StatusCallBack;
 	uint8_t state = RF_Config(&rf_Config);
 
 	uint8_t adv[] = {0x66, 0x55, 0x44, 0x33, 0x22, 0xd1, // MAC (reversed)
