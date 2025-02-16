@@ -49,19 +49,61 @@ void Lib_Calibration_LSI(void) {
 	Calibration_LSI(Level_64);
 }
 
+void DevInit() {
+	*(gptrLLEReg +3) = 0x1f000f;
+	*(gptrLLEReg +5) = 0x8c;
+	*(gptrLLEReg +6) = 0x78;
+	*(gptrLLEReg +7) = 0x76;
+	*(gptrLLEReg +8) = 0xffffffff;
+	*(gptrLLEReg +9) = 0x8c;
+	*(gptrLLEReg +11) = 0x6e;
+	*(gptrLLEReg +13) = 0x8c;
+	*(gptrLLEReg +15) = 0x6e;
+	*(gptrLLEReg +17) = 0x8c;
+	*(gptrLLEReg +19) = 0x76;
+	*(gptrLLEReg +21) = 0x14;
+	*(gptrLLEReg +31) = ble.MEMAddr;
+
+	*(gptrRFENDReg +10) = 0x480;
+	*(gptrRFENDReg +12) = *(gptrRFENDReg +12) & 0x8fffffff | 0x10077700;
+	*(gptrRFENDReg +15) = *(gptrRFENDReg +15) & 0x18ff0fff | 0x42005000;
+	*(gptrRFENDReg +19) &= 0xfffffff8;
+	*(gptrRFENDReg +21) = *(gptrRFENDReg +21) & 0xfffffff0 | 9;
+	*(gptrRFENDReg +23) &= 0xff88ffff;
+
+	*(gptrBBReg) |= 0x800000;
+	*(gptrBBReg +13) = 0x50;
+
+	*(gptrBBReg +11) |= 0x80000000;
+	*(gptrBBReg +11) = ((ble.TxPower & 0x3f) << 0x19) | (*(gptrBBReg +11) & 0x81ffffff);
+	uint32_t uVar3 = 0x1000000;
+	uint32_t uVar4 = *(gptrRFENDReg +23) & 0xf8ffffff;
+	if(ble.TxPower < 29) {
+		/* uVar3 and uVar4 are initialized properly already */
+	}
+	else if(ble.TxPower < 35) {
+		uVar3 = 0x3000000;
+	}
+	else if(ble.TxPower < 59) {
+		uVar3 = 0x5000000;
+	}
+	else {
+		uVar4 = *(gptrRFENDReg +23);
+		uVar3 = 0x7000000;
+	}
+	*(gptrRFENDReg +23) = uVar4 | uVar3;
+	*(gptrBBReg +4) = *(gptrBBReg +4) & 0xffffffc0 | 0xe;
+}
+
 void RegInit() {
-	phy_status_clear(10);
-	LLE_DevInit();
-	RFEND_DevInit();
-	BB_DevInit();
 	*gptrBBReg = *gptrBBReg & 0xfffffcff | 0x280;
-	*(gptrRFENDReg + 2) |= 0x330000;
-	*(gptrLLEReg + 20) = 0x30558;
+	*(gptrRFENDReg +2) |= 0x330000;
+	*(gptrLLEReg +20) = 0x30558;
 	RFEND_TXCtune();
 	RFEND_TXFtune();
 	*gptrBBReg = *gptrBBReg & 0xfffffcff | 0x100;
-	*(gptrRFENDReg + 2) &= 0xffcdffff;
-	*(gptrLLEReg + 20) = 0x30000;
+	*(gptrRFENDReg +2) &= 0xffcdffff;
+	*(gptrLLEReg +20) = 0x30000;
 	gBleIPPara.par7 = 0; // DAT_20003b77 = 0;
 }
 
@@ -75,6 +117,7 @@ void IPCoreInit() {
 	gBleIPPara.par7 = 1; // DAT_20003b77 = 1;
 	gBleIPPara.par13 = ble.MEMAddr; // DAT_20003b88 = ble;
 	gBleIPPara.par12 = ble.MEMAddr + 0x110; // DAT_20003b84 = ble + 0x110;
+	DevInit();
 	RegInit();
 	PFIC->IPRIOR[0x15] |= 0x80;
 	PFIC->IENR[0] = 0x200000;
