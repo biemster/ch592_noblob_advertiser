@@ -62,7 +62,7 @@ void DevInit() {
 	*(gptrLLEReg +17) = 0x8c;
 	*(gptrLLEReg +19) = 0x76;
 	*(gptrLLEReg +21) = 0x14;
-	*(gptrLLEReg +31) = ble.MEMAddr;
+	*(gptrLLEReg +31) = (uint32_t)MEM_BUF;
 
 	*(gptrRFENDReg +10) = 0x480;
 	*(gptrRFENDReg +12) = *(gptrRFENDReg +12) & 0x8fffffff | 0x10077700;
@@ -287,8 +287,8 @@ void IPCoreInit() {
 	gptrAESReg = (uint32_t *)0x4000c300;
 	gptrRFENDReg = (uint32_t *)0x4000d000;
 	gBleIPPara.par7 = 1; // DAT_20003b77 = 1;
-	gBleIPPara.par13 = ble.MEMAddr; // DAT_20003b88 = ble; (=MEM_BUF)
-	gBleIPPara.par12 = ble.MEMAddr + 0x110; // DAT_20003b84 = ble + 0x110;
+	gBleIPPara.par13 = (uint32_t)MEM_BUF; // DAT_20003b88 = ble; (=MEM_BUF)
+	gBleIPPara.par12 = (uint32_t)MEM_BUF + 0x110; // DAT_20003b84 = ble + 0x110;
 	DevInit();
 	RegInit();
 	PFIC->IPRIOR[0x15] |= 0x80;
