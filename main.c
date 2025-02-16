@@ -1,13 +1,35 @@
 #include "HAL.h"
 
+extern uint8_t dtmFlag;
+extern uint32_t gPaControl;
+extern uint32_t *gptrAESReg;
+extern uint32_t *gptrLLEReg;
+extern uint32_t *gptrRFENDReg;
+extern uint32_t *gptrBBReg;
+
 __attribute__((aligned(4))) uint32_t MEM_BUF[BLE_MEMHEAP_SIZE / 4]; // try to get rid of this
 uint32_t g_LLE_IRQLibHandlerLocation;
 volatile uint8_t tx_end_flag = 0;
 rfConfig_t rf_Config = {0};
+extern bleConfig_t ble;
 
-void Lib_Calibration_LSI(void) {
-	Calibration_LSI(Level_64);
-}
+struct bleIPPara {
+	uint8_t par0;
+	uint8_t par1;
+	uint8_t par2;
+	uint8_t par3;
+	uint8_t par4;
+	uint8_t par5;
+	uint8_t par6;
+	uint8_t par7;
+	uint8_t par8;
+	uint8_t par9;
+	uint32_t par10;
+	uint32_t par11;
+	uint32_t par12;
+	uint32_t par13;
+};
+extern struct bleIPPara gBleIPPara;
 
 __HIGH_CODE
 __attribute__((noinline))
@@ -21,6 +43,41 @@ void RF_Wait_Tx_End() {
 			tx_end_flag = TRUE;
 		}
 	}
+}
+
+void Lib_Calibration_LSI(void) {
+	Calibration_LSI(Level_64);
+}
+
+void RegInit() {
+	phy_status_clear(10);
+	LLE_DevInit();
+	RFEND_DevInit();
+	BB_DevInit();
+	*gptrBBReg = *gptrBBReg & 0xfffffcff | 0x280;
+	*(gptrRFENDReg + 2) |= 0x330000;
+	*(gptrLLEReg + 20) = 0x30558;
+	RFEND_TXCtune();
+	RFEND_TXFtune();
+	*gptrBBReg = *gptrBBReg & 0xfffffcff | 0x100;
+	*(gptrRFENDReg + 2) &= 0xffcdffff;
+	*(gptrLLEReg + 20) = 0x30000;
+	gBleIPPara.par7 = 0; // DAT_20003b77 = 0;
+}
+
+void IPCoreInit() {
+	dtmFlag = 0;
+	gPaControl = 0;
+	gptrBBReg = (uint32_t *)0x4000c100;
+	gptrLLEReg = (uint32_t *)0x4000c200;
+	gptrAESReg = (uint32_t *)0x4000c300;
+	gptrRFENDReg = (uint32_t *)0x4000d000;
+	gBleIPPara.par7 = 1; // DAT_20003b77 = 1;
+	gBleIPPara.par13 = ble.MEMAddr; // DAT_20003b88 = ble;
+	gBleIPPara.par12 = ble.MEMAddr + 0x110; // DAT_20003b84 = ble + 0x110;
+	RegInit();
+	PFIC->IPRIOR[0x15] |= 0x80;
+	PFIC->IENR[0] = 0x200000;
 }
 
 void RF_2G4StatusCallBack(uint8_t sta, uint8_t crc, uint8_t *rxBuf) {
@@ -55,10 +112,11 @@ int main(void) {
 	blecfg.MEMAddr = (uint32_t)MEM_BUF;
 	blecfg.MEMLen = (uint32_t)BLE_MEMHEAP_SIZE;
 	BLE_LibInit(&blecfg);
-	RF_RoleInit();
 
-	rf_Config.accessAddress = 0x8E89BED6;
-	rf_Config.CRCInit = 0x555555;
+	IPCoreInit();
+
+	rf_Config.accessAddress = 0x8E89BED6; // gptrBBReg[2]
+	rf_Config.CRCInit = 0x555555; // gptrBBReg[1]
 	rf_Config.LLEMode = LLE_MODE_BASIC;
 	rf_Config.rfStatusCB = RF_2G4StatusCallBack;
 	uint8_t state = RF_Config(&rf_Config);
