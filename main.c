@@ -10,10 +10,14 @@ extern uint32_t *gptrBBReg;
 __attribute__((aligned(4))) uint32_t MEM_BUF[BLE_MEMHEAP_SIZE / 4]; // used in LL as ble.MEMAddr
 uint32_t g_LLE_IRQLibHandlerLocation;
 volatile uint8_t tx_end_flag = 0;
-rfConfig_t rf_Config = {0};
+extern rfConfig_t rfConfig;
 extern bleConfig_t ble;
+extern uint8_t tmosSign;
 
-struct bleIPPara {
+extern void rf_stop();
+extern uint32_t fnGetClockCBs();
+
+struct bleIPPara_t {
 	uint8_t par0;
 	uint8_t par1;
 	uint8_t par2;
@@ -29,11 +33,36 @@ struct bleIPPara {
 	uint32_t par12;
 	uint32_t par13;
 };
-extern struct bleIPPara gBleIPPara;
+extern struct bleIPPara_t gBleIPPara;
+
+struct bleClock {
+	uint32_t par0;
+	uint32_t par1;
+	uint16_t par2;
+	uint16_t par3;
+	uint8_t par4;
+	uint8_t par5;
+	uint8_t par6;
+	uint8_t par7;
+};
+extern struct bleClock bleClock_t; // this name sucks
+
+struct rfInfo_t {
+	uint8_t par0;
+	uint8_t par1;
+	uint8_t par2;
+	uint8_t par3;
+	uint32_t par4;
+	int32_t par5;
+	uint8_t par6;
+	/* there is more stuff */
+};
+extern struct rfInfo_t rfInfo;
 
 __HIGH_CODE
 __attribute__((noinline))
 void RF_Wait_Tx_End() {
+	tx_end_flag = FALSE;
 	uint32_t i = 0;
 	while(!tx_end_flag) {
 		i++;
@@ -295,6 +324,85 @@ void IPCoreInit() {
 	PFIC->IENR[0] = 0x200000;
 }
 
+void txProcess() {
+	if((gBleIPPara.par3 & 1) == 0) {
+		if(gptrLLEReg[25]) {
+			if(gBleIPPara.par7 == 0x03) {
+				tmosSign = 1;
+			}
+			return;
+		}
+		rf_stop();
+	}
+	else {
+		rf_stop();
+		gBleIPPara.par3 = 0;
+	}
+	gBleIPPara.par4 = 0;
+}
+
+void Advertise(uint8_t adv[], size_t len, uint8_t channel) {
+	if(rfInfo.par6 & 2) {
+		uint32_t hopper = 0;
+		do {
+			do {
+				hopper = RF_FrequencyHoppingGet();
+			} while(hopper < 16);
+		} while((uint32_t)rfConfig.HopPeriod * 0x20 - 0x10 < hopper);
+		gptrLLEReg[25] = 0x50;
+	}
+	gptrBBReg[11] = gptrBBReg[11] & 0xfffffffc | 1;
+
+	gptrRFENDReg[11] &= 0xfffffffd;
+	gptrBBReg[0] = gptrBBReg[0] & 0xffffff80 | channel & 0x7f;
+	if(rfConfig.LLEMode & 2) {
+		gptrBBReg[0] = gptrBBReg[0] & 0xffffff80 | gptrBBReg[0] & 0x7f | 0x40;
+	}
+
+	gptrBBReg[0] &= 0xfffffeff;
+	gptrRFENDReg[2] |= 0x330000;
+	gptrLLEReg[20] = 0x30258;
+	gptrBBReg[2] = rfConfig.accessAddress;
+	gptrBBReg[1] = rfConfig.CRCInit;
+	gptrLLEReg[1] = gptrLLEReg[1] & 0xfffffffe | rfConfig.LLEMode & 1;
+
+	*(uint8_t*)(gBleIPPara.par12) = 0x02; //TxPktType
+	*(uint8_t*)(gBleIPPara.par12 +1) = len ;
+	tmos_memcpy((uint8_t*)(gBleIPPara.par12 +2), adv, len);
+
+
+	gptrLLEReg[30] = gBleIPPara.par12;
+	gBleIPPara.par2 = 0;
+	gBleIPPara.par3 = 0;
+	gBleIPPara.par4 = 0;
+	gBleIPPara.par7 = 0x03;
+
+	if(rfInfo.par6 & 2) {
+		while(gptrLLEReg[25]);
+		uint32_t getClockCB = fnGetClockCBs();
+		int32_t clockCB = -(rfInfo.par5);
+		if(getClockCB < rfInfo.par5) {
+			clockCB = bleClock_t.par1 - rfInfo.par5;
+		}
+
+		len += 2;
+		*(uint8_t*)(gBleIPPara.par12 +1) = len;
+		*(uint8_t*)(gBleIPPara.par12 +len) = 0;
+		*(uint8_t*)(gBleIPPara.par12 +len +1) = (uint8_t)(getClockCB + clockCB >> 3); // what's this now?
+	}
+
+	BLE_SetPHYTxMode(rfConfig.LLEMode >> 4 & 3, len);
+	TMOS_SysRegister(txProcess);
+
+	gptrBBReg[0] |= 0x800000;
+	gptrBBReg[11] &= 0xfffffffc;
+	gBleIPPara.par1 = 0;
+	gBleIPPara.par5 = 0;
+	gptrLLEReg[0] = 2;
+
+	RF_Wait_Tx_End();
+}
+
 void RF_2G4StatusCallBack(uint8_t sta, uint8_t crc, uint8_t *rxBuf) {
 	switch(sta) {
 	case TX_MODE_TX_FINISH:
@@ -307,12 +415,9 @@ void RF_2G4StatusCallBack(uint8_t sta, uint8_t crc, uint8_t *rxBuf) {
 }
 
 void send_adv(uint8_t adv[], size_t len, uint8_t channel) {
-	rf_Config.Channel = channel;
-	uint8_t state = RF_Config(&rf_Config);
-	tx_end_flag = FALSE;
-	if(!RF_Tx(adv, len, 0x02, 0xFF)) {
-		RF_Wait_Tx_End();
-	}
+	rfConfig.Channel = channel;
+	RF_Tx(adv, len, 0x02, 0xFF);
+	RF_Wait_Tx_End();
 }
 
 int main(void) {
@@ -330,6 +435,7 @@ int main(void) {
 
 	IPCoreInit();
 
+	rfConfig_t rf_Config = {0};
 	rf_Config.accessAddress = 0x8E89BED6; // gptrBBReg[2]
 	rf_Config.CRCInit = 0x555555; // gptrBBReg[1]
 	rf_Config.LLEMode = LLE_MODE_BASIC;
@@ -342,9 +448,13 @@ int main(void) {
 					0xbb, 0xaa, 0x99, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, // more key
 					0x00, 0x00}; // status byte and one more
 
-	send_adv(adv, sizeof(adv), 37);
-	send_adv(adv, sizeof(adv), 38);
-	send_adv(adv, sizeof(adv), 39);
+	uint8_t adv_channels[] = {37,38,39};
+	for(int c = 0; c < sizeof(adv_channels); c++) {
+		// rfConfig.Channel = adv_channels[c];
+		// RF_Tx(adv, sizeof(adv), 0x02, 0xFF);
+		// RF_Wait_Tx_End();
+		Advertise(adv, sizeof(adv), adv_channels[c]);
+	}
 
 	GPIOA_ResetBits(GPIO_Pin_8);
 	CH59x_LowPower(MS_TO_RTC(30));

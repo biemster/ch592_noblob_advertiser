@@ -96,10 +96,8 @@ main.elf: $(OBJS)
 	    $(CFLAGS_COMMON) \
 	    -T "sdk/Ld/Link.ld" \
 	    -nostartfiles \
-	    -Xlinker \
-	    --gc-sections \
-	    -Xlinker \
-	    --print-memory-usage \
+	    -Xlinker --gc-sections \
+	    -Xlinker --print-memory-usage \
 	    -Wl,-Map,"main.map" \
 	    -Lobj \
 	    --specs=nano.specs \
