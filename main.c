@@ -15,7 +15,6 @@ extern bleConfig_t ble;
 extern uint8_t tmosSign;
 
 extern void rf_stop();
-extern uint32_t fnGetClockCBs();
 
 struct bleIPPara_t {
 	uint8_t par0;
@@ -34,18 +33,6 @@ struct bleIPPara_t {
 	uint32_t par13;
 };
 extern struct bleIPPara_t gBleIPPara;
-
-struct bleClock {
-	uint32_t par0;
-	uint32_t par1;
-	uint16_t par2;
-	uint16_t par3;
-	uint8_t par4;
-	uint8_t par5;
-	uint8_t par6;
-	uint8_t par7;
-};
-extern struct bleClock bleClock_t; // this name sucks
 
 struct rfInfo_t {
 	uint8_t par0;
@@ -377,22 +364,8 @@ void Advertise(uint8_t adv[], size_t len, uint8_t channel) {
 	gBleIPPara.par4 = 0;
 	gBleIPPara.par7 = 0x03;
 
-	if(rfInfo.par6 & 2) {
-		while(gptrLLEReg[25]);
-		uint32_t getClockCB = fnGetClockCBs();
-		int32_t clockCB = -(rfInfo.par5);
-		if(getClockCB < rfInfo.par5) {
-			clockCB = bleClock_t.par1 - rfInfo.par5;
-		}
-
-		len += 2;
-		*(uint8_t*)(gBleIPPara.par12 +1) = len;
-		*(uint8_t*)(gBleIPPara.par12 +len) = 0;
-		*(uint8_t*)(gBleIPPara.par12 +len +1) = (uint8_t)(getClockCB + clockCB >> 3); // what's this now?
-	}
-
 	BLE_SetPHYTxMode(rfConfig.LLEMode >> 4 & 3, len);
-	TMOS_SysRegister(txProcess);
+	txProcess();
 
 	gptrBBReg[0] |= 0x800000;
 	gptrBBReg[11] &= 0xfffffffc;
@@ -412,12 +385,6 @@ void RF_2G4StatusCallBack(uint8_t sta, uint8_t crc, uint8_t *rxBuf) {
 	default:
 		break;
 	}
-}
-
-void send_adv(uint8_t adv[], size_t len, uint8_t channel) {
-	rfConfig.Channel = channel;
-	RF_Tx(adv, len, 0x02, 0xFF);
-	RF_Wait_Tx_End();
 }
 
 int main(void) {
@@ -450,9 +417,6 @@ int main(void) {
 
 	uint8_t adv_channels[] = {37,38,39};
 	for(int c = 0; c < sizeof(adv_channels); c++) {
-		// rfConfig.Channel = adv_channels[c];
-		// RF_Tx(adv, sizeof(adv), 0x02, 0xFF);
-		// RF_Wait_Tx_End();
 		Advertise(adv, sizeof(adv), adv_channels[c]);
 	}
 
