@@ -346,7 +346,7 @@ void IPCoreInit(uint8_t TxPower) {
 void DevSetChannel(uint8_t channel) {
 	gptrRFENDReg[11] &= 0xfffffffd;
 	gptrBBReg[0] = gptrBBReg[0] & 0xffffff80 | channel & 0x7f;
-	if(rfConfig.LLEMode & 2) {
+	if(LLE_MODE_BASIC & 2) {
 		gptrBBReg[0] = gptrBBReg[0] & 0xffffff80 | gptrBBReg[0] & 0x7f | 0x40;
 	}
 }
@@ -450,13 +450,13 @@ void Advertise(uint8_t adv[], size_t len, uint8_t channel) {
 	gptrBBReg[0] &= 0xfffffeff;
 	gptrRFENDReg[2] |= 0x330000;
 	gptrLLEReg[20] = 0x30258;
-	gptrBBReg[2] = rfConfig.accessAddress;
-	gptrBBReg[1] = rfConfig.CRCInit;
-	gptrLLEReg[1] = gptrLLEReg[1] & 0xfffffffe | rfConfig.LLEMode & 1;
+	gptrBBReg[2] = 0x8E89BED6;
+	gptrBBReg[1] = 0x555555;
+	gptrLLEReg[1] = gptrLLEReg[1] & 0xfffffffe | LLE_MODE_BASIC & 1;
 
 	*(uint8_t*)(gBleIPPara.par15) = 0x02; //TxPktType
 	*(uint8_t*)(gBleIPPara.par15 +1) = len ;
-	tmos_memcpy((uint8_t*)(gBleIPPara.par15 +2), adv, len);
+	memcpy((uint8_t*)(gBleIPPara.par15 +2), adv, len);
 
 	gptrLLEReg[30] = gBleIPPara.par15;
 	gBleIPPara.par2 = 0;
@@ -478,7 +478,7 @@ void Advertise(uint8_t adv[], size_t len, uint8_t channel) {
 		*(uint8_t*)(gBleIPPara.par12 +len +1) = (uint8_t)(getClockCB + clockCB >> 3);
 	}
 
-	PHYSetTxMode(rfConfig.LLEMode >> 4 & 3, len);
+	PHYSetTxMode(LLE_MODE_BASIC >> 4 & 3, len);
 	txProcess();
 
 	gptrBBReg[0] |= 0x800000;
@@ -508,19 +508,14 @@ int main(void) {
 	HAL_TimeInit();
 	HAL_SleepInit();
 
-	g_LLE_IRQLibHandlerLocation = (uint32_t)LLE_IRQLibHandler;
+	g_LLE_IRQLibHandlerLocation = (uint32_t)LLE_IRQLibHandler; // for ble_task_scheduler.S
 	ble.MEMAddr = (uint32_t)MEM_BUF;
 	ble.MEMLen = (uint32_t)BLE_MEMHEAP_SIZE;
 	TMOS_Init(); // for the BLE clocks R told me
 
 	IPCoreInit(TXPOWER_MINUS_3_DBM);
 
-	rfConfig_t rf_Config = {0};
-	rf_Config.accessAddress = 0x8E89BED6; // gptrBBReg[2]
-	rf_Config.CRCInit = 0x555555; // gptrBBReg[1]
-	rf_Config.LLEMode = LLE_MODE_BASIC;
-	rf_Config.rfStatusCB = RF_2G4StatusCallBack;
-	uint8_t state = RF_Config(&rf_Config);
+	rfConfig.rfStatusCB = RF_2G4StatusCallBack;
 
 	uint8_t adv[] = {0x66, 0x55, 0x44, 0x33, 0x22, 0xd1, // MAC (reversed)
 					0x1e, 0xff, 0x4c, 0x00, 0x12, 0x19, 0x00, // Apple FindMy stuff
