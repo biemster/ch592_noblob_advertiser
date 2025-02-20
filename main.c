@@ -1,7 +1,7 @@
 #include "HAL.h"
 
 extern uint8_t dtmFlag;
-extern uint32_t gPaControl;
+extern uint32_t volatile **gPaControl;
 extern uint32_t *gptrAESReg;
 extern uint32_t *gptrLLEReg;
 extern uint32_t volatile *gptrRFENDReg; // needs volatile, otherwise part of the tuning process is optimized out
@@ -27,10 +27,13 @@ struct bleIPPara_t {
 	uint8_t par7;
 	uint8_t par8;
 	uint8_t par9;
-	uint32_t par10;
-	uint32_t par11;
-	uint32_t par12;
-	uint32_t par13;
+	uint8_t par10;
+	uint8_t par11;
+	uint8_t par12;
+	uint8_t par13;
+	uint32_t par14;
+	uint32_t par15;
+	uint32_t par16;
 };
 extern struct bleIPPara_t gBleIPPara;
 
@@ -303,12 +306,44 @@ void IPCoreInit() {
 	gptrAESReg = (uint32_t *)0x4000c300;
 	gptrRFENDReg = (uint32_t *)0x4000d000;
 	gBleIPPara.par7 = 1; // DAT_20003b77 = 1;
-	gBleIPPara.par13 = (uint32_t)MEM_BUF; // DAT_20003b88 = ble; (=MEM_BUF)
-	gBleIPPara.par12 = (uint32_t)MEM_BUF + 0x110; // DAT_20003b84 = ble + 0x110;
+	gBleIPPara.par16 = (uint32_t)MEM_BUF; // DAT_20003b88 = ble; (=MEM_BUF)
+	gBleIPPara.par15 = (uint32_t)MEM_BUF + 0x110; // DAT_20003b84 = ble + 0x110;
 	DevInit();
 	RegInit();
 	PFIC->IPRIOR[0x15] |= 0x80;
 	PFIC->IENR[0] = 0x200000;
+}
+
+void DevSetChannel(uint8_t channel) {
+	gptrRFENDReg[11] &= 0xfffffffd;
+	gptrBBReg[0] = gptrBBReg[0] & 0xffffff80 | channel & 0x7f;
+	if(rfConfig.LLEMode & 2) {
+		gptrBBReg[0] = gptrBBReg[0] & 0xffffff80 | gptrBBReg[0] & 0x7f | 0x40;
+	}
+}
+
+void PHYSetTxMode(int32_t mode, size_t len) {
+	if(gPaControl) {
+		*gPaControl[4] |= *gPaControl[5];
+		*gPaControl[0] |= *gPaControl[2];
+	}
+
+	int32_t idx = 0;
+	if(mode == 1) {
+		gptrBBReg[0] |= 0x80;
+		idx = (len +11) *4;
+	}
+	else {
+		gptrBBReg[0] &= 0xffffff7f;;
+		idx = (len +10) *8;
+	}
+
+	gptrLLEReg[3] &= 0xfffdffff;
+	__asm__ volatile("fence.i");
+	gptrLLEReg[2] = 0x20000;
+
+	gBleIPPara.par4 = 0x80;
+	gptrLLEReg[25] = (idx + gBleIPPara.par10 + 0x9e) *2;
 }
 
 void txProcess() {
@@ -340,11 +375,7 @@ void Advertise(uint8_t adv[], size_t len, uint8_t channel) {
 	}
 	gptrBBReg[11] = gptrBBReg[11] & 0xfffffffc | 1;
 
-	gptrRFENDReg[11] &= 0xfffffffd;
-	gptrBBReg[0] = gptrBBReg[0] & 0xffffff80 | channel & 0x7f;
-	if(rfConfig.LLEMode & 2) {
-		gptrBBReg[0] = gptrBBReg[0] & 0xffffff80 | gptrBBReg[0] & 0x7f | 0x40;
-	}
+	DevSetChannel(channel);
 
 	gptrBBReg[0] &= 0xfffffeff;
 	gptrRFENDReg[2] |= 0x330000;
@@ -353,18 +384,17 @@ void Advertise(uint8_t adv[], size_t len, uint8_t channel) {
 	gptrBBReg[1] = rfConfig.CRCInit;
 	gptrLLEReg[1] = gptrLLEReg[1] & 0xfffffffe | rfConfig.LLEMode & 1;
 
-	*(uint8_t*)(gBleIPPara.par12) = 0x02; //TxPktType
-	*(uint8_t*)(gBleIPPara.par12 +1) = len ;
-	tmos_memcpy((uint8_t*)(gBleIPPara.par12 +2), adv, len);
+	*(uint8_t*)(gBleIPPara.par15) = 0x02; //TxPktType
+	*(uint8_t*)(gBleIPPara.par15 +1) = len ;
+	tmos_memcpy((uint8_t*)(gBleIPPara.par15 +2), adv, len);
 
-
-	gptrLLEReg[30] = gBleIPPara.par12;
+	gptrLLEReg[30] = gBleIPPara.par15;
 	gBleIPPara.par2 = 0;
 	gBleIPPara.par3 = 0;
 	gBleIPPara.par4 = 0;
 	gBleIPPara.par7 = 0x03;
 
-	BLE_SetPHYTxMode(rfConfig.LLEMode >> 4 & 3, len);
+	PHYSetTxMode(rfConfig.LLEMode >> 4 & 3, len);
 	txProcess();
 
 	gptrBBReg[0] |= 0x800000;
