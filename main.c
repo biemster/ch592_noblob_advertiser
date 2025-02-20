@@ -14,7 +14,6 @@ extern rfConfig_t rfConfig;
 extern bleConfig_t ble;
 extern uint8_t tmosSign;
 
-extern void rf_stop();
 extern uint32_t (*fnGetClockCBs)();
 
 struct bleClock {
@@ -415,10 +414,8 @@ void txProcess() {
 			}
 			return;
 		}
-		rf_stop();
 	}
 	else {
-		rf_stop();
 		gBleIPPara.par3 = 0;
 	}
 	gBleIPPara.par4 = 0;
