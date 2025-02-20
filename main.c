@@ -15,6 +15,19 @@ extern bleConfig_t ble;
 extern uint8_t tmosSign;
 
 extern void rf_stop();
+extern uint32_t (*fnGetClockCBs)();
+
+struct bleClock {
+	uint32_t par0;
+	uint32_t par1;
+	uint16_t par2;
+	uint16_t par3;
+	uint8_t par4;
+	uint8_t par5;
+	uint8_t par6;
+	uint8_t par7;
+};
+extern struct bleClock bleClock_t; // this name sucks
 
 struct bleIPPara_t {
 	uint8_t par0;
@@ -45,7 +58,12 @@ struct rfInfo_t {
 	uint32_t par4;
 	int32_t par5;
 	uint8_t par6;
-	/* there is more stuff */
+	uint8_t par7;
+	uint8_t par8;
+	uint8_t par9;
+	uint8_t par10;
+	uint8_t par11;
+	/* there might be more stuff */
 };
 extern struct rfInfo_t rfInfo;
 
@@ -346,6 +364,49 @@ void PHYSetTxMode(int32_t mode, size_t len) {
 	gptrLLEReg[25] = (idx + gBleIPPara.par10 + 0x9e) *2;
 }
 
+void HopChannel() {
+	uint32_t chan = rfInfo.par7 + rfConfig.HopIndex & 0x1f;
+	uint32_t cnt = 0;
+	rfConfig.Channel = chan;
+	rfInfo.par7 = chan;
+	if(rfConfig.ChannelMap >> chan & 1) {
+		for(uint8_t i = 0; i < 0x20; i++) {
+			if ((rfConfig.ChannelMap >> (i & 0x1f) & 1) != 0) {
+				if (chan % (uint32_t)rfInfo.par11 == cnt) {
+					rfConfig.Channel = i;
+					return;
+				}
+			cnt = cnt + 1 & 0xff;
+			}
+		}
+	}
+}
+
+uint32_t FrequencyHopper() {
+	uint32_t res = 0;
+	uint32_t period = 0;
+	uint32_t getClockCB = (*fnGetClockCBs)();
+	int32_t clockCB = -(rfInfo.par5);
+	if(rfInfo.par5 != getClockCB) {
+		if(getClockCB < rfInfo.par5) {
+			clockCB = bleClock_t.par1 - rfInfo.par5;
+		}
+		res = getClockCB + clockCB >> 5;
+		if(rfConfig.HopPeriod <= res) {
+			do {
+				HopChannel();
+				period = rfConfig.HopPeriod;
+				rfInfo.par5 += period * 0x20;
+				res -= period;
+				if(bleClock_t.par1 <= rfInfo.par5) {
+					rfInfo.par5 -= bleClock_t.par1;
+				}
+			} while(period <= res);
+		}
+	}
+	return res;
+}
+
 void txProcess() {
 	if((gBleIPPara.par3 & 1) == 0) {
 		if(gptrLLEReg[25]) {
@@ -368,7 +429,7 @@ void Advertise(uint8_t adv[], size_t len, uint8_t channel) {
 		uint32_t hopper = 0;
 		do {
 			do {
-				hopper = RF_FrequencyHoppingGet();
+				hopper = FrequencyHopper();
 			} while(hopper < 16);
 		} while((uint32_t)rfConfig.HopPeriod * 0x20 - 0x10 < hopper);
 		gptrLLEReg[25] = 0x50;
@@ -393,6 +454,20 @@ void Advertise(uint8_t adv[], size_t len, uint8_t channel) {
 	gBleIPPara.par3 = 0;
 	gBleIPPara.par4 = 0;
 	gBleIPPara.par7 = 0x03;
+
+	if(rfInfo.par6 & 2) {
+		while(gptrLLEReg[25]);
+		uint32_t getClockCB = (*fnGetClockCBs)();
+		int32_t clockCB = -(rfInfo.par5);
+		if(getClockCB < rfInfo.par5) {
+			clockCB = bleClock_t.par1 - rfInfo.par5;
+		}
+
+		len += 2;
+		*(uint8_t*)(gBleIPPara.par12 +1) = len;
+		*(uint8_t*)(gBleIPPara.par12 +len) = 0;
+		*(uint8_t*)(gBleIPPara.par12 +len +1) = (uint8_t)(getClockCB + clockCB >> 3);
+	}
 
 	PHYSetTxMode(rfConfig.LLEMode >> 4 & 3, len);
 	txProcess();
