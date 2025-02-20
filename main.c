@@ -1,4 +1,16 @@
 #include "HAL.h"
+#define TXPOWER_MINUS_20_DBM       0x01
+#define TXPOWER_MINUS_15_DBM       0x03
+#define TXPOWER_MINUS_10_DBM       0x05
+#define TXPOWER_MINUS_8_DBM        0x07
+#define TXPOWER_MINUS_5_DBM        0x0B
+#define TXPOWER_MINUS_3_DBM        0x0F
+#define TXPOWER_MINUS_1_DBM        0x13
+#define TXPOWER_0_DBM              0x15
+#define TXPOWER_1_DBM              0x1B
+#define TXPOWER_2_DBM              0x23
+#define TXPOWER_3_DBM              0x2B
+#define TXPOWER_4_DBM              0x3B
 
 extern uint8_t dtmFlag;
 extern uint32_t volatile **gPaControl;
@@ -7,7 +19,7 @@ extern uint32_t *gptrLLEReg;
 extern uint32_t volatile *gptrRFENDReg; // needs volatile, otherwise part of the tuning process is optimized out
 extern uint32_t *gptrBBReg;
 
-__attribute__((aligned(4))) uint32_t MEM_BUF[BLE_MEMHEAP_SIZE / 4]; // used in LL as ble.MEMAddr
+__attribute__((aligned(4))) uint32_t MEM_BUF[BLE_MEMHEAP_SIZE / 4];
 uint32_t g_LLE_IRQLibHandlerLocation;
 volatile uint8_t tx_end_flag = 0;
 extern rfConfig_t rfConfig;
@@ -85,7 +97,7 @@ void Lib_Calibration_LSI(void) {
 	Calibration_LSI(Level_64);
 }
 
-void DevInit() {
+void DevInit(uint8_t TxPower) {
 	gptrLLEReg[3] = 0x1f000f;
 	gptrLLEReg[5] = 0x8c;
 	gptrLLEReg[6] = 0x78;
@@ -111,16 +123,16 @@ void DevInit() {
 	gptrBBReg[13] = 0x50;
 
 	gptrBBReg[11] |= 0x80000000;
-	gptrBBReg[11] = ((ble.TxPower & 0x3f) << 0x19) | (gptrBBReg[11] & 0x81ffffff);
+	gptrBBReg[11] = ((TxPower & 0x3f) << 0x19) | (gptrBBReg[11] & 0x81ffffff);
 	uint32_t uVar3 = 0x1000000;
 	uint32_t uVar4 = gptrRFENDReg[23] & 0xf8ffffff;
-	if(ble.TxPower < 29) {
+	if(TxPower < 29) {
 		/* uVar3 and uVar4 are initialized properly already */
 	}
-	else if(ble.TxPower < 35) {
+	else if(TxPower < 35) {
 		uVar3 = 0x3000000;
 	}
-	else if(ble.TxPower < 59) {
+	else if(TxPower < 59) {
 		uVar3 = 0x5000000;
 	}
 	else {
@@ -315,7 +327,7 @@ void RegInit() {
 	gBleIPPara.par7 = 0; // DAT_20003b77 = 0;
 }
 
-void IPCoreInit() {
+void IPCoreInit(uint8_t TxPower) {
 	dtmFlag = 0;
 	gPaControl = 0;
 	gptrBBReg = (uint32_t *)0x4000c100;
@@ -323,9 +335,9 @@ void IPCoreInit() {
 	gptrAESReg = (uint32_t *)0x4000c300;
 	gptrRFENDReg = (uint32_t *)0x4000d000;
 	gBleIPPara.par7 = 1; // DAT_20003b77 = 1;
-	gBleIPPara.par16 = (uint32_t)MEM_BUF; // DAT_20003b88 = ble; (=MEM_BUF)
-	gBleIPPara.par15 = (uint32_t)MEM_BUF + 0x110; // DAT_20003b84 = ble + 0x110;
-	DevInit();
+	gBleIPPara.par16 = (uint32_t)MEM_BUF;
+	gBleIPPara.par15 = (uint32_t)MEM_BUF + 0x110;
+	DevInit(TxPower);
 	RegInit();
 	PFIC->IPRIOR[0x15] |= 0x80;
 	PFIC->IENR[0] = 0x200000;
@@ -497,12 +509,11 @@ int main(void) {
 	HAL_SleepInit();
 
 	g_LLE_IRQLibHandlerLocation = (uint32_t)LLE_IRQLibHandler;
-	bleConfig_t blecfg = {0};
-	blecfg.MEMAddr = (uint32_t)MEM_BUF;
-	blecfg.MEMLen = (uint32_t)BLE_MEMHEAP_SIZE;
-	BLE_LibInit(&blecfg);
+	ble.MEMAddr = (uint32_t)MEM_BUF;
+	ble.MEMLen = (uint32_t)BLE_MEMHEAP_SIZE;
+	TMOS_Init(); // for the BLE clocks R told me
 
-	IPCoreInit();
+	IPCoreInit(TXPOWER_MINUS_3_DBM);
 
 	rfConfig_t rf_Config = {0};
 	rf_Config.accessAddress = 0x8E89BED6; // gptrBBReg[2]
