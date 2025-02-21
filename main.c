@@ -24,7 +24,7 @@ extern uint32_t MemCtlStart;
 extern uint32_t MemCtlPartition;
 extern uint32_t MemCtlEnd;
 
-uint32_t g_LLE_IRQLibHandlerLocation;
+uint32_t g_LLE_IRQLibHandlerLocation; // for ble_task_scheduler.S
 volatile uint8_t tx_end_flag = 0;
 rfConfig_t rfcfg = {0};
 extern uint8_t tmosSign;
@@ -62,7 +62,7 @@ struct bleIPPara_t {
 	uint32_t par15;
 	uint32_t par16;
 };
-extern struct bleIPPara_t gBleIPPara;
+struct bleIPPara_t BLEParams;
 
 struct rfInfo_t {
 	uint8_t par0;
@@ -339,7 +339,7 @@ void RegInit() {
 	gptrBBReg[0] = gptrBBReg[0] & 0xfffffcff | 0x100;
 	gptrRFENDReg[2] &= 0xffcdffff;
 	gptrLLEReg[20] = 0x30000;
-	gBleIPPara.par7 = 0; // DAT_20003b77 = 0;
+	BLEParams.par7 = 0; // DAT_20003b77 = 0;
 }
 
 void IPCoreInit(uint8_t TxPower) {
@@ -349,9 +349,9 @@ void IPCoreInit(uint8_t TxPower) {
 	gptrLLEReg = (uint32_t *)0x4000c200;
 	gptrAESReg = (uint32_t *)0x4000c300;
 	gptrRFENDReg = (uint32_t *)0x4000d000;
-	gBleIPPara.par7 = 1; // DAT_20003b77 = 1;
-	gBleIPPara.par16 = (uint32_t)MEM_BUF;
-	gBleIPPara.par15 = (uint32_t)MEM_BUF + 0x110;
+	BLEParams.par7 = 1; // DAT_20003b77 = 1;
+	BLEParams.par16 = (uint32_t)MEM_BUF;
+	BLEParams.par15 = (uint32_t)MEM_BUF + 0x110;
 	DevInit(TxPower);
 	RegInit();
 	PFIC->IPRIOR[0x15] |= 0x80;
@@ -386,8 +386,8 @@ void PHYSetTxMode(int32_t mode, size_t len) {
 	__asm__ volatile("fence.i");
 	gptrLLEReg[2] = 0x20000;
 
-	gBleIPPara.par4 = 0x80;
-	gptrLLEReg[25] = (idx + gBleIPPara.par10 + 0x9e) *2;
+	BLEParams.par4 = 0x80;
+	gptrLLEReg[25] = (idx + BLEParams.par10 + 0x9e) *2;
 }
 
 void HopChannel() {
@@ -434,18 +434,18 @@ uint32_t FrequencyHopper() {
 }
 
 void txProcess() {
-	if((gBleIPPara.par3 & 1) == 0) {
+	if((BLEParams.par3 & 1) == 0) {
 		if(gptrLLEReg[25]) {
-			if(gBleIPPara.par7 == 0x03) {
+			if(BLEParams.par7 == 0x03) {
 				tmosSign = 1;
 			}
 			return;
 		}
 	}
 	else {
-		gBleIPPara.par3 = 0;
+		BLEParams.par3 = 0;
 	}
-	gBleIPPara.par4 = 0;
+	BLEParams.par4 = 0;
 }
 
 void Advertise(uint8_t adv[], size_t len, uint8_t channel) {
@@ -469,15 +469,15 @@ void Advertise(uint8_t adv[], size_t len, uint8_t channel) {
 	gptrBBReg[1] = 0x555555;
 	gptrLLEReg[1] = gptrLLEReg[1] & 0xfffffffe | LLE_MODE_BASIC & 1;
 
-	*(uint8_t*)(gBleIPPara.par15) = 0x02; //TxPktType
-	*(uint8_t*)(gBleIPPara.par15 +1) = len ;
-	memcpy((uint8_t*)(gBleIPPara.par15 +2), adv, len);
+	*(uint8_t*)(BLEParams.par15) = 0x02; //TxPktType
+	*(uint8_t*)(BLEParams.par15 +1) = len ;
+	memcpy((uint8_t*)(BLEParams.par15 +2), adv, len);
 
-	gptrLLEReg[30] = gBleIPPara.par15;
-	gBleIPPara.par2 = 0;
-	gBleIPPara.par3 = 0;
-	gBleIPPara.par4 = 0;
-	gBleIPPara.par7 = 0x03;
+	gptrLLEReg[30] = BLEParams.par15;
+	BLEParams.par2 = 0;
+	BLEParams.par3 = 0;
+	BLEParams.par4 = 0;
+	BLEParams.par7 = 0x03;
 
 	if(rfInfo.par6 & 2) {
 		while(gptrLLEReg[25]);
@@ -488,9 +488,9 @@ void Advertise(uint8_t adv[], size_t len, uint8_t channel) {
 		}
 
 		len += 2;
-		*(uint8_t*)(gBleIPPara.par12 +1) = len;
-		*(uint8_t*)(gBleIPPara.par12 +len) = 0;
-		*(uint8_t*)(gBleIPPara.par12 +len +1) = (uint8_t)(getClockCB + clockCB >> 3);
+		*(uint8_t*)(BLEParams.par12 +1) = len;
+		*(uint8_t*)(BLEParams.par12 +len) = 0;
+		*(uint8_t*)(BLEParams.par12 +len +1) = (uint8_t)(getClockCB + clockCB >> 3);
 	}
 
 	PHYSetTxMode(LLE_MODE_BASIC >> 4 & 3, len);
@@ -498,8 +498,8 @@ void Advertise(uint8_t adv[], size_t len, uint8_t channel) {
 
 	gptrBBReg[0] |= 0x800000;
 	gptrBBReg[11] &= 0xfffffffc;
-	gBleIPPara.par1 = 0;
-	gBleIPPara.par5 = 0;
+	BLEParams.par1 = 0;
+	BLEParams.par5 = 0;
 	gptrLLEReg[0] = 2;
 
 	RF_Wait_Tx_End();
@@ -523,7 +523,7 @@ int main(void) {
 	HAL_TimeInit();
 	HAL_SleepInit();
 
-	g_LLE_IRQLibHandlerLocation = (uint32_t)LLE_ISR; // for ble_task_scheduler.S
+	g_LLE_IRQLibHandlerLocation = (uint32_t)LLE_ISR;
 	memory_init();
 
 	IPCoreInit(TXPOWER_MINUS_3_DBM);
@@ -545,5 +545,5 @@ int main(void) {
 	CH59x_LowPower(MS_TO_RTC(30));
 	GPIOA_SetBits(GPIO_Pin_8);
 
-	CH59x_LowPower(MS_TO_RTC(100));
+	CH59x_LowPower(MS_TO_RTC(70));
 }
