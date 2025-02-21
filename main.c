@@ -26,20 +26,6 @@ uint32_t g_LLE_IRQLibHandlerLocation; // for ble_task_scheduler.S
 volatile uint8_t tx_end_flag = 0;
 rfConfig_t rfcfg = {0};
 
-extern uint32_t (*fnGetClockCBs)();
-
-struct bleClock {
-	uint32_t par0;
-	uint32_t par1;
-	uint16_t par2;
-	uint16_t par3;
-	uint8_t par4;
-	uint8_t par5;
-	uint8_t par6;
-	uint8_t par7;
-};
-extern struct bleClock bleClock_t; // this name sucks
-
 struct bleIPPara_t {
 	uint8_t par0;
 	uint8_t par1;
@@ -401,24 +387,13 @@ void HopChannel() {
 uint32_t FrequencyHopper() {
 	uint32_t res = 0;
 	uint32_t period = 0;
-	uint32_t getClockCB = (*fnGetClockCBs)();
-	int32_t clockCB = -(rfinf.par5);
-	if(rfinf.par5 != getClockCB) {
-		if(getClockCB < rfinf.par5) {
-			clockCB = bleClock_t.par1 - rfinf.par5;
-		}
-		res = getClockCB + clockCB >> 5;
-		if(rfcfg.HopPeriod <= res) {
-			do {
-				HopChannel();
-				period = rfcfg.HopPeriod;
-				rfinf.par5 += period * 0x20;
-				res -= period;
-				if(bleClock_t.par1 <= rfinf.par5) {
-					rfinf.par5 -= bleClock_t.par1;
-				}
-			} while(period <= res);
-		}
+	if(rfcfg.HopPeriod <= res) {
+		do {
+			HopChannel();
+			period = rfcfg.HopPeriod;
+			rfinf.par5 += period * 0x20;
+			res -= period;
+		} while(period <= res);
 	}
 	return res;
 }
@@ -453,20 +428,6 @@ void Advertise(uint8_t adv[], size_t len, uint8_t channel) {
 	BLEParams.par3 = 0;
 	BLEParams.par4 = 0;
 	BLEParams.par7 = 0x03;
-
-	if(rfinf.par6 & 2) {
-		while(gptrLLEReg[25]);
-		uint32_t getClockCB = (*fnGetClockCBs)();
-		int32_t clockCB = -(rfinf.par5);
-		if(getClockCB < rfinf.par5) {
-			clockCB = bleClock_t.par1 - rfinf.par5;
-		}
-
-		len += 2;
-		*(uint8_t*)(BLEParams.par12 +1) = len;
-		*(uint8_t*)(BLEParams.par12 +len) = 0;
-		*(uint8_t*)(BLEParams.par12 +len +1) = (uint8_t)(getClockCB + clockCB >> 3);
-	}
 
 	PHYSetTxMode(LLE_MODE_BASIC >> 4 & 3, len);
 
