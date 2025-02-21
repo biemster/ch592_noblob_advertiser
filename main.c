@@ -23,6 +23,7 @@ extern uint32_t MemCtlPartition;
 extern uint32_t MemCtlEnd;
 
 uint32_t g_LLE_IRQLibHandlerLocation; // for ble_task_scheduler.S
+volatile uint32_t RTCTigFlag;
 volatile uint8_t tx_end_flag = 0;
 rfConfig_t rfcfg = {0};
 
@@ -70,6 +71,13 @@ void LLE_ISR() {
 	gptrLLEReg[2] = 0xffffffff; // STATUS
 }
 
+__INTERRUPT
+__HIGH_CODE
+void RTC_IRQHandler(void) {
+	R8_RTC_FLAG_CTRL = (RB_RTC_TMR_CLR | RB_RTC_TRIG_CLR);
+	RTCTigFlag = 1;
+}
+
 __HIGH_CODE
 __attribute__((noinline))
 void RF_Wait_Tx_End() {
@@ -86,13 +94,9 @@ void RF_Wait_Tx_End() {
 }
 
 void memory_init() {
-	MemCtlStart = (uint32_t)MEM_BUF;
+	MemCtlStart = (uint32_t)MEM_BUF + 0x220; // why 0x220? it works without as well
 	MemCtlEnd = MemCtlStart + (uint32_t)BLE_MEMHEAP_SIZE -8;
 	MemCtlPartition = (uint32_t)BLE_MEMHEAP_SIZE >> 3;
-}
-
-void Lib_Calibration_LSI(void) {
-	Calibration_LSI(Level_64);
 }
 
 void DevInit(uint8_t TxPower) {
@@ -451,12 +455,70 @@ void RF_2G4StatusCallBack(uint8_t sta, uint8_t crc, uint8_t *rxBuf) {
 	}
 }
 
+void LowPower(uint32_t time) {
+	volatile uint32_t i;
+	uint32_t time_sleep, time_curr;
+	unsigned long irq_status;
+	
+	if (time <= WAKE_UP_RTC_MAX_TIME) {
+		time = time + (RTC_MAX_COUNT - WAKE_UP_RTC_MAX_TIME);
+	}
+	else {
+		time = time - WAKE_UP_RTC_MAX_TIME;
+	}
+
+	SYS_DisableAllIrq(&irq_status);
+	time_curr = RTC_GetCycle32k();
+	if (time < time_curr) {
+		time_sleep = time + (RTC_MAX_COUNT - time_curr);
+	}
+	else {
+		time_sleep = time - time_curr;
+	}
+	
+	if ((time_sleep < SLEEP_RTC_MIN_TIME) || 
+		(time_sleep > SLEEP_RTC_MAX_TIME)) {
+		SYS_RecoverIrq(irq_status);
+	}
+	else {
+		sys_safe_access_enable();
+		R32_RTC_TRIG = time;
+		sys_safe_access_disable();
+		RTCTigFlag = 0;
+		SYS_RecoverIrq(irq_status);
+	
+		if(!RTCTigFlag) {
+			LowPower_Sleep(RB_PWR_RAM2K | RB_PWR_RAM24K | RB_PWR_EXTEND | RB_XT_PRE_EN );
+			HSECFG_Current(HSE_RCur_100);
+			i = RTC_GetCycle32k();
+			while(i == RTC_GetCycle32k());
+		}
+	}
+}
+
 int main(void) {
 	PWR_DCDCCfg(ENABLE);
 	SetSysClock(CLK_SOURCE_PLL_60MHz);
 	GPIOA_ModeCfg(GPIO_Pin_8, GPIO_ModeOut_PP_5mA);
-	HAL_TimeInit();
-	HAL_SleepInit();
+
+	// RTC init (and oscillator calib)
+	sys_safe_access_enable();
+	R8_CK32K_CONFIG &= ~(RB_CLK_OSC32K_XT | RB_CLK_XT32K_PON);
+	sys_safe_access_disable();
+	sys_safe_access_enable();
+	R8_CK32K_CONFIG |= RB_CLK_INT32K_PON;
+	sys_safe_access_disable();
+	Calibration_LSI(Level_64);
+	RTC_InitTime(2020, 1, 1, 0, 0, 0);
+
+	// sleep init
+	sys_safe_access_enable();
+	R8_SLP_WAKE_CTRL |= RB_SLP_RTC_WAKE;
+	sys_safe_access_disable();
+	sys_safe_access_enable();
+	R8_RTC_MODE_CTRL |= RB_RTC_TRIG_EN;
+	sys_safe_access_disable();
+	PFIC_EnableIRQ(RTC_IRQn);
 
 	g_LLE_IRQLibHandlerLocation = (uint32_t)LLE_ISR;
 	memory_init();
@@ -477,8 +539,8 @@ int main(void) {
 	}
 
 	GPIOA_ResetBits(GPIO_Pin_8);
-	CH59x_LowPower(MS_TO_RTC(30));
+	LowPower(MS_TO_RTC(30));
 	GPIOA_SetBits(GPIO_Pin_8);
 
-	CH59x_LowPower(MS_TO_RTC(70));
+	LowPower(MS_TO_RTC(70));
 }

@@ -9,12 +9,6 @@ TOOLCHAIN_PREFIX := ../MRS_Toolchain_Linux_x64_V1.92/RISC-V_Embedded_GCC12/bin/r
 APP_C_SRCS = \
   ./main.c
 
-
-SDK_BLE_HAL_C_SRCS = \
-  ./sdk/BLE/HAL/RTC.c \
-  ./sdk/BLE/HAL/SLEEP.c
-
-
 SDK_STDPERIPHDRIVER_C_SRCS += \
   ./sdk/StdPeriphDriver/CH59x_adc.c \
   ./sdk/StdPeriphDriver/CH59x_clk.c \
@@ -32,7 +26,6 @@ SDK_STARTUP_S_UPPER_SRCS += \
 
 C_SRCS := \
   $(APP_C_SRCS) \
-  $(SDK_BLE_HAL_C_SRCS) \
   $(SDK_STDPERIPHDRIVER_C_SRCS) \
   $(SDK_RVMSIS_C_SRCS)
 
