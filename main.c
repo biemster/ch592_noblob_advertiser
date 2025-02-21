@@ -12,15 +12,12 @@
 #define TXPOWER_3_DBM              0x2B
 #define TXPOWER_4_DBM              0x3B
 
-extern uint32_t *gptrAESReg;
-extern uint32_t *gptrLLEReg;
-extern uint32_t volatile *gptrRFENDReg; // needs volatile, otherwise part of the tuning process is optimized out
-extern uint32_t *gptrBBReg;
+uint32_t *gptrAESReg;
+uint32_t *gptrLLEReg;
+uint32_t volatile *gptrRFENDReg; // needs volatile, otherwise part of the tuning process is optimized out
+uint32_t *gptrBBReg;
 
 __attribute__((aligned(4))) uint32_t MEM_BUF[BLE_MEMHEAP_SIZE / 4];
-extern uint32_t MemCtlStart;
-extern uint32_t MemCtlPartition;
-extern uint32_t MemCtlEnd;
 
 uint32_t g_LLE_IRQLibHandlerLocation; // for ble_task_scheduler.S
 volatile uint32_t RTCTigFlag;
@@ -91,12 +88,6 @@ void RF_Wait_Tx_End() {
 			tx_end_flag = TRUE;
 		}
 	}
-}
-
-void memory_init() {
-	MemCtlStart = (uint32_t)MEM_BUF + 0x220; // why 0x220? it works without as well
-	MemCtlEnd = MemCtlStart + (uint32_t)BLE_MEMHEAP_SIZE -8;
-	MemCtlPartition = (uint32_t)BLE_MEMHEAP_SIZE >> 3;
 }
 
 void DevInit(uint8_t TxPower) {
@@ -521,7 +512,6 @@ int main(void) {
 	PFIC_EnableIRQ(RTC_IRQn);
 
 	g_LLE_IRQLibHandlerLocation = (uint32_t)LLE_ISR;
-	memory_init();
 
 	IPCoreInit(TXPOWER_MINUS_3_DBM);
 
