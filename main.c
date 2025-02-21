@@ -22,7 +22,7 @@ extern uint32_t *gptrBBReg;
 __attribute__((aligned(4))) uint32_t MEM_BUF[BLE_MEMHEAP_SIZE / 4];
 uint32_t g_LLE_IRQLibHandlerLocation;
 volatile uint8_t tx_end_flag = 0;
-extern rfConfig_t rfConfig;
+rfConfig_t rfcfg = {0};
 extern bleConfig_t ble;
 extern uint8_t tmosSign;
 
@@ -376,15 +376,15 @@ void PHYSetTxMode(int32_t mode, size_t len) {
 }
 
 void HopChannel() {
-	uint32_t chan = rfInfo.par7 + rfConfig.HopIndex & 0x1f;
+	uint32_t chan = rfInfo.par7 + rfcfg.HopIndex & 0x1f;
 	uint32_t cnt = 0;
-	rfConfig.Channel = chan;
+	rfcfg.Channel = chan;
 	rfInfo.par7 = chan;
-	if(rfConfig.ChannelMap >> chan & 1) {
+	if(rfcfg.ChannelMap >> chan & 1) {
 		for(uint8_t i = 0; i < 0x20; i++) {
-			if ((rfConfig.ChannelMap >> (i & 0x1f) & 1) != 0) {
+			if ((rfcfg.ChannelMap >> (i & 0x1f) & 1) != 0) {
 				if (chan % (uint32_t)rfInfo.par11 == cnt) {
-					rfConfig.Channel = i;
+					rfcfg.Channel = i;
 					return;
 				}
 			cnt = cnt + 1 & 0xff;
@@ -403,10 +403,10 @@ uint32_t FrequencyHopper() {
 			clockCB = bleClock_t.par1 - rfInfo.par5;
 		}
 		res = getClockCB + clockCB >> 5;
-		if(rfConfig.HopPeriod <= res) {
+		if(rfcfg.HopPeriod <= res) {
 			do {
 				HopChannel();
-				period = rfConfig.HopPeriod;
+				period = rfcfg.HopPeriod;
 				rfInfo.par5 += period * 0x20;
 				res -= period;
 				if(bleClock_t.par1 <= rfInfo.par5) {
@@ -440,7 +440,7 @@ void Advertise(uint8_t adv[], size_t len, uint8_t channel) {
 			do {
 				hopper = FrequencyHopper();
 			} while(hopper < 16);
-		} while((uint32_t)rfConfig.HopPeriod * 0x20 - 0x10 < hopper);
+		} while((uint32_t)rfcfg.HopPeriod * 0x20 - 0x10 < hopper);
 		gptrLLEReg[25] = 0x50;
 	}
 	gptrBBReg[11] = gptrBBReg[11] & 0xfffffffc | 1;
@@ -515,7 +515,7 @@ int main(void) {
 
 	IPCoreInit(TXPOWER_MINUS_3_DBM);
 
-	rfConfig.rfStatusCB = RF_2G4StatusCallBack;
+	rfcfg.rfStatusCB = RF_2G4StatusCallBack;
 
 	uint8_t adv[] = {0x66, 0x55, 0x44, 0x33, 0x22, 0xd1, // MAC (reversed)
 					0x1e, 0xff, 0x4c, 0x00, 0x12, 0x19, 0x00, // Apple FindMy stuff
