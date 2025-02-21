@@ -81,6 +81,12 @@ struct rfInfo_t {
 };
 extern struct rfInfo_t rfInfo;
 
+__INTERRUPT
+__HIGH_CODE
+void LLE_ISR() {
+	gptrLLEReg[2] = 0xffffffff; // STATUS
+}
+
 __HIGH_CODE
 __attribute__((noinline))
 void RF_Wait_Tx_End() {
@@ -517,7 +523,7 @@ int main(void) {
 	HAL_TimeInit();
 	HAL_SleepInit();
 
-	g_LLE_IRQLibHandlerLocation = (uint32_t)LLE_IRQLibHandler; // for ble_task_scheduler.S
+	g_LLE_IRQLibHandlerLocation = (uint32_t)LLE_ISR; // for ble_task_scheduler.S
 	memory_init();
 
 	IPCoreInit(TXPOWER_MINUS_3_DBM);
@@ -539,5 +545,5 @@ int main(void) {
 	CH59x_LowPower(MS_TO_RTC(30));
 	GPIOA_SetBits(GPIO_Pin_8);
 
-	CH59x_LowPower(MS_TO_RTC(1000));
+	CH59x_LowPower(MS_TO_RTC(100));
 }
