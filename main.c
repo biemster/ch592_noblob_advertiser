@@ -79,7 +79,7 @@ struct rfInfo_t {
 	uint8_t par11;
 	/* there might be more stuff */
 };
-extern struct rfInfo_t rfInfo;
+struct rfInfo_t rfinf;
 
 __INTERRUPT
 __HIGH_CODE
@@ -391,14 +391,14 @@ void PHYSetTxMode(int32_t mode, size_t len) {
 }
 
 void HopChannel() {
-	uint32_t chan = rfInfo.par7 + rfcfg.HopIndex & 0x1f;
+	uint32_t chan = rfinf.par7 + rfcfg.HopIndex & 0x1f;
 	uint32_t cnt = 0;
 	rfcfg.Channel = chan;
-	rfInfo.par7 = chan;
+	rfinf.par7 = chan;
 	if(rfcfg.ChannelMap >> chan & 1) {
 		for(uint8_t i = 0; i < 0x20; i++) {
 			if ((rfcfg.ChannelMap >> (i & 0x1f) & 1) != 0) {
-				if (chan % (uint32_t)rfInfo.par11 == cnt) {
+				if (chan % (uint32_t)rfinf.par11 == cnt) {
 					rfcfg.Channel = i;
 					return;
 				}
@@ -412,20 +412,20 @@ uint32_t FrequencyHopper() {
 	uint32_t res = 0;
 	uint32_t period = 0;
 	uint32_t getClockCB = (*fnGetClockCBs)();
-	int32_t clockCB = -(rfInfo.par5);
-	if(rfInfo.par5 != getClockCB) {
-		if(getClockCB < rfInfo.par5) {
-			clockCB = bleClock_t.par1 - rfInfo.par5;
+	int32_t clockCB = -(rfinf.par5);
+	if(rfinf.par5 != getClockCB) {
+		if(getClockCB < rfinf.par5) {
+			clockCB = bleClock_t.par1 - rfinf.par5;
 		}
 		res = getClockCB + clockCB >> 5;
 		if(rfcfg.HopPeriod <= res) {
 			do {
 				HopChannel();
 				period = rfcfg.HopPeriod;
-				rfInfo.par5 += period * 0x20;
+				rfinf.par5 += period * 0x20;
 				res -= period;
-				if(bleClock_t.par1 <= rfInfo.par5) {
-					rfInfo.par5 -= bleClock_t.par1;
+				if(bleClock_t.par1 <= rfinf.par5) {
+					rfinf.par5 -= bleClock_t.par1;
 				}
 			} while(period <= res);
 		}
@@ -449,7 +449,7 @@ void txProcess() {
 }
 
 void Advertise(uint8_t adv[], size_t len, uint8_t channel) {
-	if(rfInfo.par6 & 2) {
+	if(rfinf.par6 & 2) {
 		uint32_t hopper = 0;
 		do {
 			do {
@@ -479,12 +479,12 @@ void Advertise(uint8_t adv[], size_t len, uint8_t channel) {
 	BLEParams.par4 = 0;
 	BLEParams.par7 = 0x03;
 
-	if(rfInfo.par6 & 2) {
+	if(rfinf.par6 & 2) {
 		while(gptrLLEReg[25]);
 		uint32_t getClockCB = (*fnGetClockCBs)();
-		int32_t clockCB = -(rfInfo.par5);
-		if(getClockCB < rfInfo.par5) {
-			clockCB = bleClock_t.par1 - rfInfo.par5;
+		int32_t clockCB = -(rfinf.par5);
+		if(getClockCB < rfinf.par5) {
+			clockCB = bleClock_t.par1 - rfinf.par5;
 		}
 
 		len += 2;
