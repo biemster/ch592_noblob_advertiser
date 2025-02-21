@@ -20,10 +20,13 @@ extern uint32_t volatile *gptrRFENDReg; // needs volatile, otherwise part of the
 extern uint32_t *gptrBBReg;
 
 __attribute__((aligned(4))) uint32_t MEM_BUF[BLE_MEMHEAP_SIZE / 4];
+extern uint32_t MemCtlStart;
+extern uint32_t MemCtlPartition;
+extern uint32_t MemCtlEnd;
+
 uint32_t g_LLE_IRQLibHandlerLocation;
 volatile uint8_t tx_end_flag = 0;
 rfConfig_t rfcfg = {0};
-extern bleConfig_t ble;
 extern uint8_t tmosSign;
 
 extern uint32_t (*fnGetClockCBs)();
@@ -91,6 +94,12 @@ void RF_Wait_Tx_End() {
 			tx_end_flag = TRUE;
 		}
 	}
+}
+
+void memory_init() {
+	MemCtlStart = (uint32_t)MEM_BUF;
+	MemCtlEnd = MemCtlStart + (uint32_t)BLE_MEMHEAP_SIZE -8;
+	MemCtlPartition = (uint32_t)BLE_MEMHEAP_SIZE >> 3;
 }
 
 void Lib_Calibration_LSI(void) {
@@ -509,9 +518,7 @@ int main(void) {
 	HAL_SleepInit();
 
 	g_LLE_IRQLibHandlerLocation = (uint32_t)LLE_IRQLibHandler; // for ble_task_scheduler.S
-	ble.MEMAddr = (uint32_t)MEM_BUF;
-	ble.MEMLen = (uint32_t)BLE_MEMHEAP_SIZE;
-	TMOS_Init(); // for the BLE clocks R told me
+	memory_init();
 
 	IPCoreInit(TXPOWER_MINUS_3_DBM);
 
