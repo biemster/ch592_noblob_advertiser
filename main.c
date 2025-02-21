@@ -12,8 +12,6 @@
 #define TXPOWER_3_DBM              0x2B
 #define TXPOWER_4_DBM              0x3B
 
-extern uint8_t dtmFlag;
-extern uint32_t volatile **gPaControl;
 extern uint32_t *gptrAESReg;
 extern uint32_t *gptrLLEReg;
 extern uint32_t volatile *gptrRFENDReg; // needs volatile, otherwise part of the tuning process is optimized out
@@ -342,8 +340,6 @@ void RegInit() {
 }
 
 void IPCoreInit(uint8_t TxPower) {
-	dtmFlag = 0;
-	gPaControl = 0;
 	gptrBBReg = (uint32_t *)0x4000c100;
 	gptrLLEReg = (uint32_t *)0x4000c200;
 	gptrAESReg = (uint32_t *)0x4000c300;
@@ -366,11 +362,6 @@ void DevSetChannel(uint8_t channel) {
 }
 
 void PHYSetTxMode(int32_t mode, size_t len) {
-	if(gPaControl) {
-		*gPaControl[4] |= *gPaControl[5];
-		*gPaControl[0] |= *gPaControl[2];
-	}
-
 	int32_t idx = 0;
 	if(mode == 1) {
 		gptrBBReg[0] |= 0x80;
