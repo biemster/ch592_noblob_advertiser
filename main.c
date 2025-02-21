@@ -27,7 +27,6 @@ extern uint32_t MemCtlEnd;
 uint32_t g_LLE_IRQLibHandlerLocation; // for ble_task_scheduler.S
 volatile uint8_t tx_end_flag = 0;
 rfConfig_t rfcfg = {0};
-extern uint8_t tmosSign;
 
 extern uint32_t (*fnGetClockCBs)();
 
@@ -433,21 +432,6 @@ uint32_t FrequencyHopper() {
 	return res;
 }
 
-void txProcess() {
-	if((BLEParams.par3 & 1) == 0) {
-		if(gptrLLEReg[25]) {
-			if(BLEParams.par7 == 0x03) {
-				tmosSign = 1;
-			}
-			return;
-		}
-	}
-	else {
-		BLEParams.par3 = 0;
-	}
-	BLEParams.par4 = 0;
-}
-
 void Advertise(uint8_t adv[], size_t len, uint8_t channel) {
 	if(rfinf.par6 & 2) {
 		uint32_t hopper = 0;
@@ -494,7 +478,6 @@ void Advertise(uint8_t adv[], size_t len, uint8_t channel) {
 	}
 
 	PHYSetTxMode(LLE_MODE_BASIC >> 4 & 3, len);
-	txProcess();
 
 	gptrBBReg[0] |= 0x800000;
 	gptrBBReg[11] &= 0xfffffffc;
