@@ -251,7 +251,6 @@ int main(void) {
 		}
 		blink(1);
 
-		LowPower(MS_TO_RTC(SLEEPTIME_MS -33));
-		DCDCEnable(); // Sleep disables DCDC
+		LowPowerIdle(MS_TO_RTC(SLEEPTIME_MS -33));
 	}
 }
