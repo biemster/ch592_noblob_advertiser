@@ -4,15 +4,13 @@
 
 #define TX_MODE_TX_FINISH   0x01  //!< basic or auto tx mode sends data successfully
 #define TX_MODE_TX_FAIL     0x11  //!< basic or auto tx mode fail to send data and enter idle state
-#define LLE_MODE_BASIC      0
 
-uint32_t *gptrLLEReg;
-uint32_t volatile *gptrRFENDReg; // needs volatile, otherwise part of the tuning process is optimized out
-uint32_t *gptrBBReg;
+uint32_t volatile *gptrLLEReg;
+uint32_t volatile *gptrRFENDReg;
+uint32_t volatile *gptrBBReg;
 
 __attribute__((aligned(4))) uint32_t LLE_BUF[0x110];
 __attribute__((aligned(4))) uint8_t  ADV_BUF[40]; // for the advertisement, which is 37 bytes + 2 header bytes
-volatile uint8_t tx_end_flag = 0;
 
 #define __I  volatile const  /*!< defines 'read only' permissions     */
 #define __O  volatile        /*!< defines 'write only' permissions     */
@@ -53,30 +51,6 @@ typedef struct
 __attribute__((interrupt))
 void LLE_IRQHandler() {
 	gptrLLEReg[2] = 0xffffffff; // STATUS
-}
-
-__attribute__((noinline))
-void RF_Wait_Tx_End() {
-	tx_end_flag = 0;
-	uint32_t i = 0;
-	while(!tx_end_flag) {
-		i++;
-		asm volatile ("nop\nnop");
-		if(i > ((60*1000*1000) / 1000)) { // 60MHz clock
-			tx_end_flag = 1;
-		}
-	}
-}
-
-void RF_2G4StatusCallBack(uint8_t sta, uint8_t crc, uint8_t *rxBuf) {
-	switch(sta) {
-	case TX_MODE_TX_FINISH:
-	case TX_MODE_TX_FAIL:
-		tx_end_flag = 1;
-		break;
-	default:
-		break;
-	}
 }
 
 void DevInit(uint8_t TxPower) {
@@ -123,8 +97,6 @@ void DevInit(uint8_t TxPower) {
 	}
 	gptrRFENDReg[23] = uVar4 | uVar3;
 	gptrBBReg[4] = gptrBBReg[4] & 0xffffffc0 | 0xe;
-	// DAT_e000e053 = 0x14; // radio.h: NVIC->IDCFGR[3] = 0x14;
-	// _DAT_e000e06c = 0x200016cf; // radio.h: NVIC->FIADDRR[3] = (uint32_t)(&BB_IRQLibFunction) | 1;
 }
 
 void RFEND_TxTuneWait() {
@@ -321,31 +293,26 @@ void BLECoreInit(uint8_t TxPower) {
 void DevSetChannel(uint8_t channel) {
 	gptrRFENDReg[11] &= 0xfffffffd;
 	gptrBBReg[0] = gptrBBReg[0] & 0xffffff80 | channel & 0x7f;
-	if(LLE_MODE_BASIC & 2) {
-		gptrBBReg[0] = gptrBBReg[0] & 0xffffff80 | gptrBBReg[0] & 0x7f | 0x40;
-	}
 }
 
-void PHYSetTxMode(int32_t mode, size_t len) {
-	int32_t idx = 0;
-	if(mode == 1) {
-		gptrBBReg[0] |= 0x80;
-		idx = (len +11) *4;
-	}
-	else {
-		gptrBBReg[0] &= 0xffffff7f;;
-		idx = (len +10) *8;
-	}
-
+void PHYSetTxMode(size_t len) {
+	gptrBBReg[0] &= 0xffffff7f;;
 	gptrLLEReg[3] &= 0xfffdffff;
 	__asm__ volatile("fence.i");
 	gptrLLEReg[2] = 0x20000;
+	gptrLLEReg[25] = (((len +10) *8) + 0x9e) *2; // txlen 1M
+}
 
-	gptrLLEReg[25] = (idx + 0x9e) *2;
+void RF_Stop() {
+	gptrLLEReg[20] &= 0xfffff8ff;
+	gptrLLEReg[0] |= 0x8;
+	gptrBBReg[0] &= 0xfffffdff;
+	gptrRFENDReg[2] &= 0xffcdffff;
+	gptrLLEReg[20] &= 0x30000;
 }
 
 void Advertise(uint8_t adv[], size_t len, uint8_t channel) {
-	gptrBBReg[11] = gptrBBReg[11] & 0xfffffffc | 1;
+	gptrBBReg[11] &= 0xfffffffd;
 
 	DevSetChannel(channel);
 
@@ -354,7 +321,7 @@ void Advertise(uint8_t adv[], size_t len, uint8_t channel) {
 	gptrLLEReg[20] = 0x30258;
 	gptrBBReg[2] = 0x8E89BED6;
 	gptrBBReg[1] = 0x555555;
-	gptrLLEReg[1] = gptrLLEReg[1] & 0xfffffffe | LLE_MODE_BASIC & 1;
+	gptrLLEReg[1] &= 0xffffffff;
 
 	ADV_BUF[0] = 0x02; //TxPktType 0x00, 0x02, 0x06 seem to work, with only 0x02 showing up on the phone
 	ADV_BUF[1] = len ;
@@ -362,11 +329,12 @@ void Advertise(uint8_t adv[], size_t len, uint8_t channel) {
 
 	gptrLLEReg[30] = (uint32_t)ADV_BUF;
 
-	PHYSetTxMode(LLE_MODE_BASIC >> 4 & 3, len);
+	PHYSetTxMode(len);
 
 	gptrBBReg[0] |= 0x800000;
 	gptrBBReg[11] &= 0xfffffffc;
 	gptrLLEReg[0] = 2;
 
-	RF_Wait_Tx_End();
+	while(gptrLLEReg[25]); // wait for tx buffer to empty
+	RF_Stop();
 }
