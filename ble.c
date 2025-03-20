@@ -1,27 +1,81 @@
-#include "HAL.h"
-#define TXPOWER_MINUS_20_DBM       0x01
-#define TXPOWER_MINUS_15_DBM       0x03
-#define TXPOWER_MINUS_10_DBM       0x05
-#define TXPOWER_MINUS_8_DBM        0x07
-#define TXPOWER_MINUS_5_DBM        0x0B
-#define TXPOWER_MINUS_3_DBM        0x0F
-#define TXPOWER_MINUS_1_DBM        0x13
-#define TXPOWER_0_DBM              0x15
-#define TXPOWER_1_DBM              0x1B
-#define TXPOWER_2_DBM              0x23
-#define TXPOWER_3_DBM              0x2B
-#define TXPOWER_4_DBM              0x3B
+#include <stdint.h>
+#include <stddef.h>
+#include <string.h>
 
-uint32_t *gptrAESReg;
+#define  TX_MODE_TX_FINISH   0x01  //!< basic or auto tx mode sends data successfully
+#define  TX_MODE_TX_FAIL     0x11  //!< basic or auto tx mode fail to send data and enter idle state
+
+#define BLE_MEMHEAP_SIZE     (1024*6)
+#define LLE_MODE_BASIC       0
+
 uint32_t *gptrLLEReg;
 uint32_t volatile *gptrRFENDReg; // needs volatile, otherwise part of the tuning process is optimized out
 uint32_t *gptrBBReg;
 
 __attribute__((aligned(4))) uint32_t MEM_BUF[BLE_MEMHEAP_SIZE / 4];
 
-uint32_t g_LLE_IRQLibHandlerLocation; // for ble_task_scheduler.S
-volatile uint32_t RTCTigFlag;
 volatile uint8_t tx_end_flag = 0;
+
+#define __I  volatile const  /*!< defines 'read only' permissions     */
+#define __O  volatile        /*!< defines 'write only' permissions     */
+#define __IO volatile        /*!< defines 'read / write' permissions   */
+/* memory mapped structure for Program Fast Interrupt Controller (PFIC) */
+typedef struct
+{
+	__I uint32_t  ISR[8];           // 0
+	__I uint32_t  IPR[8];           // 20H
+	__IO uint32_t ITHRESDR;         // 40H
+	uint8_t       RESERVED[4];      // 44H
+	__O uint32_t  CFGR;             // 48H
+	__I uint32_t  GISR;             // 4CH
+	__IO uint8_t  VTFIDR[4];        // 50H
+	uint8_t       RESERVED0[0x0C];  // 54H
+	__IO uint32_t VTFADDR[4];       // 60H
+	uint8_t       RESERVED1[0x90];  // 70H
+	__O uint32_t  IENR[8];          // 100H
+	uint8_t       RESERVED2[0x60];  // 120H
+	__O uint32_t  IRER[8];          // 180H
+	uint8_t       RESERVED3[0x60];  // 1A0H
+	__O uint32_t  IPSR[8];          // 200H
+	uint8_t       RESERVED4[0x60];  // 220H
+	__O uint32_t  IPRR[8];          // 280H
+	uint8_t       RESERVED5[0x60];  // 2A0H
+	__IO uint32_t IACTR[8];         // 300H
+	uint8_t       RESERVED6[0xE0];  // 320H
+	__IO uint8_t  IPRIOR[256];      // 400H
+	uint8_t       RESERVED7[0x810]; // 500H
+	__IO uint32_t SCTLR;            // D10H
+} PFIC_Type;
+
+#define CORE_PERIPH_BASE     (0xE0000000) /* System peripherals base address in the alias region */
+#define PFIC_BASE            (CORE_PERIPH_BASE + 0xE000)
+#define PFIC                 ((PFIC_Type *) PFIC_BASE)
+#define NVIC                 PFIC
+
+typedef void (*pfnRFStatusCB_t)( uint8_t sta, uint8_t rsr, uint8_t *rxBuf );
+typedef struct tag_rf_config
+{
+    uint8_t LLEMode;                  //!< BIT0   0=basic, 1=auto def@LLE_MODE_TYPE
+                                      //!< BIT1   0=whitening on, 1=whitening off def@LLE_WHITENING_TYPE
+                                      //!< BIT4-5 00-1M  01-2M  10/11-resv def@LLE_PHY_TYPE
+                                      //!< BIT6   0=data channel(0-39)
+                                      //!<        1=rf frequency (2400000kHz-2483500kHz)
+                                      //!< BIT7   0=the first byte of the receive buffer is rssi
+                                      //!<        1=the first byte of the receive buffer is package type
+    uint8_t Channel;                  //!< rf channel(0-39)
+    uint32_t Frequency;               //!< rf frequency (2400000kHz-2483500kHz)
+    uint32_t accessAddress;           //!< access address,32bit PHY address
+    uint32_t CRCInit;                 //!< crc initial value
+    pfnRFStatusCB_t rfStatusCB;       //!< status call back
+    uint32_t ChannelMap;              //!< indicating  Used and Unused data channels.Every channel is represented with a
+                                      //!< bit positioned as per the data channel index,The LSB represents data channel index 0
+    uint8_t Resv;
+    uint8_t HeartPeriod;              //!< The heart package interval shall be an integer multiple of 100ms
+    uint8_t HopPeriod;                //!< hop period( T=32n*RTC clock ),default is 8
+    uint8_t HopIndex;                 //!< indicate the hopIncrement used in the data channel selection algorithm,default is 17
+    uint8_t RxMaxlen;                 //!< Maximum data length received in rf-mode(default 251)
+    uint8_t TxMaxlen;                 //!< Maximum data length transmit in rf-mode(default 251)
+} rfConfig_t;
 rfConfig_t rfcfg = {0};
 
 struct bleIPPara_t {
@@ -62,31 +116,32 @@ struct rfInfo_t {
 };
 struct rfInfo_t rfinf;
 
-__INTERRUPT
-__HIGH_CODE
-void LLE_ISR() {
+__attribute__((interrupt))
+void LLE_IRQHandler() {
 	gptrLLEReg[2] = 0xffffffff; // STATUS
 }
 
-__INTERRUPT
-__HIGH_CODE
-void RTC_IRQHandler(void) {
-	R8_RTC_FLAG_CTRL = (RB_RTC_TMR_CLR | RB_RTC_TRIG_CLR);
-	RTCTigFlag = 1;
-}
-
-__HIGH_CODE
 __attribute__((noinline))
 void RF_Wait_Tx_End() {
-	tx_end_flag = FALSE;
+	tx_end_flag = 0;
 	uint32_t i = 0;
 	while(!tx_end_flag) {
 		i++;
-		__nop();
-		__nop();
-		if(i > (FREQ_SYS/1000)) {
-			tx_end_flag = TRUE;
+		asm volatile ("nop\nnop");
+		if(i > ((60*1000*1000) / 1000)) { // 60MHz clock
+			tx_end_flag = 1;
 		}
+	}
+}
+
+void RF_2G4StatusCallBack(uint8_t sta, uint8_t crc, uint8_t *rxBuf) {
+	switch(sta) {
+	case TX_MODE_TX_FINISH:
+	case TX_MODE_TX_FAIL:
+		tx_end_flag = 1;
+		break;
+	default:
+		break;
 	}
 }
 
@@ -134,8 +189,8 @@ void DevInit(uint8_t TxPower) {
 	}
 	gptrRFENDReg[23] = uVar4 | uVar3;
 	gptrBBReg[4] = gptrBBReg[4] & 0xffffffc0 | 0xe;
-	// DAT_e000e053 = 0x14; // radio.h: PFIC->IDCFGR[3] = 0x14;
-	// _DAT_e000e06c = 0x200016cf; // radio.h: PFIC->FIADDRR[3] = (uint32_t)(&BB_IRQLibFunction) | 1;
+	// DAT_e000e053 = 0x14; // radio.h: NVIC->IDCFGR[3] = 0x14;
+	// _DAT_e000e06c = 0x200016cf; // radio.h: NVIC->FIADDRR[3] = (uint32_t)(&BB_IRQLibFunction) | 1;
 }
 
 void RFEND_TxTuneWait() {
@@ -320,18 +375,18 @@ void RegInit() {
 	BLEParams.par7 = 0; // DAT_20003b77 = 0;
 }
 
-void IPCoreInit(uint8_t TxPower) {
+void BLECoreInit(uint8_t TxPower) {
 	gptrBBReg = (uint32_t *)0x4000c100;
 	gptrLLEReg = (uint32_t *)0x4000c200;
-	gptrAESReg = (uint32_t *)0x4000c300;
 	gptrRFENDReg = (uint32_t *)0x4000d000;
 	BLEParams.par7 = 1; // DAT_20003b77 = 1;
 	BLEParams.par16 = (uint32_t)MEM_BUF;
 	BLEParams.par15 = (uint32_t)MEM_BUF + 0x110;
+	rfcfg.rfStatusCB = RF_2G4StatusCallBack;
 	DevInit(TxPower);
 	RegInit();
-	PFIC->IPRIOR[0x15] |= 0x80;
-	PFIC->IENR[0] = 0x200000;
+	NVIC->IPRIOR[0x15] |= 0x80;
+	NVIC->IENR[0] = 0x200000;
 }
 
 void DevSetChannel(uint8_t channel) {
@@ -414,7 +469,7 @@ void Advertise(uint8_t adv[], size_t len, uint8_t channel) {
 	gptrBBReg[1] = 0x555555;
 	gptrLLEReg[1] = gptrLLEReg[1] & 0xfffffffe | LLE_MODE_BASIC & 1;
 
-	*(uint8_t*)(BLEParams.par15) = 0x02; //TxPktType
+	*(uint8_t*)(BLEParams.par15) = 0x02; //TxPktType 0x00, 0x02, 0x06 seem to work, with only 0x02 showing up on the phone
 	*(uint8_t*)(BLEParams.par15 +1) = len ;
 	memcpy((uint8_t*)(BLEParams.par15 +2), adv, len);
 
@@ -433,104 +488,4 @@ void Advertise(uint8_t adv[], size_t len, uint8_t channel) {
 	gptrLLEReg[0] = 2;
 
 	RF_Wait_Tx_End();
-}
-
-void RF_2G4StatusCallBack(uint8_t sta, uint8_t crc, uint8_t *rxBuf) {
-	switch(sta) {
-	case TX_MODE_TX_FINISH:
-	case TX_MODE_TX_FAIL:
-		tx_end_flag = TRUE;
-		break;
-	default:
-		break;
-	}
-}
-
-void LowPower(uint32_t time) {
-	volatile uint32_t i;
-	uint32_t time_sleep, time_curr;
-	unsigned long irq_status;
-	
-	if (time <= WAKE_UP_RTC_MAX_TIME) {
-		time = time + (RTC_MAX_COUNT - WAKE_UP_RTC_MAX_TIME);
-	}
-	else {
-		time = time - WAKE_UP_RTC_MAX_TIME;
-	}
-
-	SYS_DisableAllIrq(&irq_status);
-	time_curr = RTC_GetCycle32k();
-	if (time < time_curr) {
-		time_sleep = time + (RTC_MAX_COUNT - time_curr);
-	}
-	else {
-		time_sleep = time - time_curr;
-	}
-	
-	if ((time_sleep < SLEEP_RTC_MIN_TIME) || 
-		(time_sleep > SLEEP_RTC_MAX_TIME)) {
-		SYS_RecoverIrq(irq_status);
-	}
-	else {
-		sys_safe_access_enable();
-		R32_RTC_TRIG = time;
-		sys_safe_access_disable();
-		RTCTigFlag = 0;
-		SYS_RecoverIrq(irq_status);
-	
-		if(!RTCTigFlag) {
-			LowPower_Sleep(RB_PWR_RAM2K | RB_PWR_RAM24K | RB_PWR_EXTEND | RB_XT_PRE_EN );
-			HSECFG_Current(HSE_RCur_100);
-			i = RTC_GetCycle32k();
-			while(i == RTC_GetCycle32k());
-		}
-	}
-}
-
-int main(void) {
-	PWR_DCDCCfg(ENABLE);
-	SetSysClock(CLK_SOURCE_PLL_60MHz);
-	GPIOA_ModeCfg(GPIO_Pin_8, GPIO_ModeOut_PP_5mA);
-
-	// RTC init (and oscillator calib)
-	sys_safe_access_enable();
-	R8_CK32K_CONFIG &= ~(RB_CLK_OSC32K_XT | RB_CLK_XT32K_PON);
-	sys_safe_access_disable();
-	sys_safe_access_enable();
-	R8_CK32K_CONFIG |= RB_CLK_INT32K_PON;
-	sys_safe_access_disable();
-	Calibration_LSI(Level_64);
-	RTC_InitTime(2020, 1, 1, 0, 0, 0);
-
-	// sleep init
-	sys_safe_access_enable();
-	R8_SLP_WAKE_CTRL |= RB_SLP_RTC_WAKE;
-	sys_safe_access_disable();
-	sys_safe_access_enable();
-	R8_RTC_MODE_CTRL |= RB_RTC_TRIG_EN;
-	sys_safe_access_disable();
-	PFIC_EnableIRQ(RTC_IRQn);
-
-	g_LLE_IRQLibHandlerLocation = (uint32_t)LLE_ISR;
-
-	IPCoreInit(TXPOWER_MINUS_3_DBM);
-
-	rfcfg.rfStatusCB = RF_2G4StatusCallBack;
-
-	uint8_t adv[] = {0x66, 0x55, 0x44, 0x33, 0x22, 0xd1, // MAC (reversed)
-					0x1e, 0xff, 0x4c, 0x00, 0x12, 0x19, 0x00, // Apple FindMy stuff
-					0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xef, 0xfe, 0xdd,0xcc, // key
-					0xbb, 0xaa, 0x99, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, // more key
-					0x00, 0x00}; // status byte and one more
-
-	uint8_t adv_channels[] = {37,38,39};
-	for(int c = 0; c < sizeof(adv_channels); c++) {
-		Advertise(adv, sizeof(adv), adv_channels[c]);
-	}
-
-	GPIOA_ResetBits(GPIO_Pin_8);
-	LowPower(MS_TO_RTC(30));
-	GPIOA_SetBits(GPIO_Pin_8);
-
-	LowPower(MS_TO_RTC(70));
 }
