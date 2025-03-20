@@ -100,7 +100,7 @@ void DevInit(uint8_t TxPower) {
 }
 
 void RFEND_TxTuneWait() {
-	gptrLLEReg[25] = 8000;
+	gptrLLEReg[25] = 0x8000;
 	while((-1 < (int32_t)gptrRFENDReg[36] << 5) || (-1 < (int32_t)gptrRFENDReg[36] << 6)) {
 		if(gptrLLEReg[25] == 0) {
 			break;
@@ -292,7 +292,7 @@ void BLECoreInit(uint8_t TxPower) {
 
 void DevSetChannel(uint8_t channel) {
 	gptrRFENDReg[11] &= 0xfffffffd;
-	gptrBBReg[0] = gptrBBReg[0] & 0xffffff80 | channel & 0x7f;
+	gptrBBReg[0] = (gptrBBReg[0] & 0xffffff80) | (channel & 0x7f);
 }
 
 void PHYSetTxMode(size_t len) {
@@ -300,19 +300,19 @@ void PHYSetTxMode(size_t len) {
 	gptrLLEReg[3] &= 0xfffdffff;
 	__asm__ volatile("fence.i");
 	gptrLLEReg[2] = 0x20000;
-	gptrLLEReg[25] = (((len +10) *8) + 0x9e) *2; // txlen 1M
+	gptrLLEReg[25] = (uint32_t)((((len +10) *8) + 0x9e) *2); // txlen 1M
 }
 
 void RF_Stop() {
 	gptrLLEReg[20] &= 0xfffff8ff;
-	gptrLLEReg[0] |= 0x8;
+	gptrLLEReg[0] |= 0x08;
 	gptrBBReg[0] &= 0xfffffdff;
 	gptrRFENDReg[2] &= 0xffcdffff;
 	gptrLLEReg[20] &= 0x30000;
 }
 
 void Advertise(uint8_t adv[], size_t len, uint8_t channel) {
-	gptrBBReg[11] &= 0xfffffffd;
+	gptrBBReg[11] = gptrBBReg[11] & 0xfffffffc | 1;
 
 	DevSetChannel(channel);
 
@@ -321,19 +321,18 @@ void Advertise(uint8_t adv[], size_t len, uint8_t channel) {
 	gptrLLEReg[20] = 0x30258;
 	gptrBBReg[2] = 0x8E89BED6;
 	gptrBBReg[1] = 0x555555;
-	gptrLLEReg[1] &= 0xffffffff;
+	gptrLLEReg[1] = gptrLLEReg[1] & 0xfffffffe | 1;
 
 	ADV_BUF[0] = 0x02; //TxPktType 0x00, 0x02, 0x06 seem to work, with only 0x02 showing up on the phone
 	ADV_BUF[1] = len ;
 	memcpy(&ADV_BUF[2], adv, len);
-
 	gptrLLEReg[30] = (uint32_t)ADV_BUF;
 
 	PHYSetTxMode(len);
 
 	gptrBBReg[0] |= 0x800000;
 	gptrBBReg[11] &= 0xfffffffc;
-	gptrLLEReg[0] = 2;
+	gptrLLEReg[0] = 0x02;
 
 	while(gptrLLEReg[25]); // wait for tx buffer to empty
 	RF_Stop();
