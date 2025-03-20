@@ -2,18 +2,16 @@
 #include <stddef.h>
 #include <string.h>
 
-#define  TX_MODE_TX_FINISH   0x01  //!< basic or auto tx mode sends data successfully
-#define  TX_MODE_TX_FAIL     0x11  //!< basic or auto tx mode fail to send data and enter idle state
-
-#define BLE_MEMHEAP_SIZE     (1024*6)
-#define LLE_MODE_BASIC       0
+#define TX_MODE_TX_FINISH   0x01  //!< basic or auto tx mode sends data successfully
+#define TX_MODE_TX_FAIL     0x11  //!< basic or auto tx mode fail to send data and enter idle state
+#define LLE_MODE_BASIC      0
 
 uint32_t *gptrLLEReg;
 uint32_t volatile *gptrRFENDReg; // needs volatile, otherwise part of the tuning process is optimized out
 uint32_t *gptrBBReg;
 
-__attribute__((aligned(4))) uint32_t MEM_BUF[BLE_MEMHEAP_SIZE / 4];
-
+__attribute__((aligned(4))) uint32_t LLE_BUF[0x110];
+__attribute__((aligned(4))) uint8_t  ADV_BUF[40]; // for the advertisement, which is 37 bytes + 2 header bytes
 volatile uint8_t tx_end_flag = 0;
 
 #define __I  volatile const  /*!< defines 'read only' permissions     */
@@ -78,27 +76,6 @@ typedef struct tag_rf_config
 } rfConfig_t;
 rfConfig_t rfcfg = {0};
 
-struct bleIPPara_t {
-	uint8_t par0;
-	uint8_t par1;
-	uint8_t par2;
-	uint8_t par3;
-	uint8_t par4;
-	uint8_t par5;
-	uint8_t par6;
-	uint8_t par7;
-	uint8_t par8;
-	uint8_t par9;
-	uint8_t par10;
-	uint8_t par11;
-	uint8_t par12;
-	uint8_t par13;
-	uint32_t par14;
-	uint32_t par15;
-	uint32_t par16;
-};
-struct bleIPPara_t BLEParams;
-
 struct rfInfo_t {
 	uint8_t par0;
 	uint8_t par1;
@@ -158,7 +135,7 @@ void DevInit(uint8_t TxPower) {
 	gptrLLEReg[17] = 0x8c;
 	gptrLLEReg[19] = 0x76;
 	gptrLLEReg[21] = 0x14;
-	gptrLLEReg[31] = (uint32_t)MEM_BUF;
+	gptrLLEReg[31] = (uint32_t)LLE_BUF;
 
 	gptrRFENDReg[10] = 0x480;
 	gptrRFENDReg[12] = gptrRFENDReg[12] & 0x8fffffff | 0x10077700;
@@ -372,16 +349,12 @@ void RegInit() {
 	gptrBBReg[0] = gptrBBReg[0] & 0xfffffcff | 0x100;
 	gptrRFENDReg[2] &= 0xffcdffff;
 	gptrLLEReg[20] = 0x30000;
-	BLEParams.par7 = 0; // DAT_20003b77 = 0;
 }
 
 void BLECoreInit(uint8_t TxPower) {
 	gptrBBReg = (uint32_t *)0x4000c100;
 	gptrLLEReg = (uint32_t *)0x4000c200;
 	gptrRFENDReg = (uint32_t *)0x4000d000;
-	BLEParams.par7 = 1; // DAT_20003b77 = 1;
-	BLEParams.par16 = (uint32_t)MEM_BUF;
-	BLEParams.par15 = (uint32_t)MEM_BUF + 0x110;
 	rfcfg.rfStatusCB = RF_2G4StatusCallBack;
 	DevInit(TxPower);
 	RegInit();
@@ -412,8 +385,7 @@ void PHYSetTxMode(int32_t mode, size_t len) {
 	__asm__ volatile("fence.i");
 	gptrLLEReg[2] = 0x20000;
 
-	BLEParams.par4 = 0x80;
-	gptrLLEReg[25] = (idx + BLEParams.par10 + 0x9e) *2;
+	gptrLLEReg[25] = (idx + 0x9e) *2;
 }
 
 void HopChannel() {
@@ -469,22 +441,16 @@ void Advertise(uint8_t adv[], size_t len, uint8_t channel) {
 	gptrBBReg[1] = 0x555555;
 	gptrLLEReg[1] = gptrLLEReg[1] & 0xfffffffe | LLE_MODE_BASIC & 1;
 
-	*(uint8_t*)(BLEParams.par15) = 0x02; //TxPktType 0x00, 0x02, 0x06 seem to work, with only 0x02 showing up on the phone
-	*(uint8_t*)(BLEParams.par15 +1) = len ;
-	memcpy((uint8_t*)(BLEParams.par15 +2), adv, len);
+	ADV_BUF[0] = 0x02; //TxPktType 0x00, 0x02, 0x06 seem to work, with only 0x02 showing up on the phone
+	ADV_BUF[1] = len ;
+	memcpy(&ADV_BUF[2], adv, len);
 
-	gptrLLEReg[30] = BLEParams.par15;
-	BLEParams.par2 = 0;
-	BLEParams.par3 = 0;
-	BLEParams.par4 = 0;
-	BLEParams.par7 = 0x03;
+	gptrLLEReg[30] = (uint32_t)ADV_BUF;
 
 	PHYSetTxMode(LLE_MODE_BASIC >> 4 & 3, len);
 
 	gptrBBReg[0] |= 0x800000;
 	gptrBBReg[11] &= 0xfffffffc;
-	BLEParams.par1 = 0;
-	BLEParams.par5 = 0;
 	gptrLLEReg[0] = 2;
 
 	RF_Wait_Tx_End();
