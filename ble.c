@@ -50,49 +50,6 @@ typedef struct
 #define PFIC                 ((PFIC_Type *) PFIC_BASE)
 #define NVIC                 PFIC
 
-typedef void (*pfnRFStatusCB_t)( uint8_t sta, uint8_t rsr, uint8_t *rxBuf );
-typedef struct tag_rf_config
-{
-    uint8_t LLEMode;                  //!< BIT0   0=basic, 1=auto def@LLE_MODE_TYPE
-                                      //!< BIT1   0=whitening on, 1=whitening off def@LLE_WHITENING_TYPE
-                                      //!< BIT4-5 00-1M  01-2M  10/11-resv def@LLE_PHY_TYPE
-                                      //!< BIT6   0=data channel(0-39)
-                                      //!<        1=rf frequency (2400000kHz-2483500kHz)
-                                      //!< BIT7   0=the first byte of the receive buffer is rssi
-                                      //!<        1=the first byte of the receive buffer is package type
-    uint8_t Channel;                  //!< rf channel(0-39)
-    uint32_t Frequency;               //!< rf frequency (2400000kHz-2483500kHz)
-    uint32_t accessAddress;           //!< access address,32bit PHY address
-    uint32_t CRCInit;                 //!< crc initial value
-    pfnRFStatusCB_t rfStatusCB;       //!< status call back
-    uint32_t ChannelMap;              //!< indicating  Used and Unused data channels.Every channel is represented with a
-                                      //!< bit positioned as per the data channel index,The LSB represents data channel index 0
-    uint8_t Resv;
-    uint8_t HeartPeriod;              //!< The heart package interval shall be an integer multiple of 100ms
-    uint8_t HopPeriod;                //!< hop period( T=32n*RTC clock ),default is 8
-    uint8_t HopIndex;                 //!< indicate the hopIncrement used in the data channel selection algorithm,default is 17
-    uint8_t RxMaxlen;                 //!< Maximum data length received in rf-mode(default 251)
-    uint8_t TxMaxlen;                 //!< Maximum data length transmit in rf-mode(default 251)
-} rfConfig_t;
-rfConfig_t rfcfg = {0};
-
-struct rfInfo_t {
-	uint8_t par0;
-	uint8_t par1;
-	uint8_t par2;
-	uint8_t par3;
-	uint32_t par4;
-	int32_t par5;
-	uint8_t par6;
-	uint8_t par7;
-	uint8_t par8;
-	uint8_t par9;
-	uint8_t par10;
-	uint8_t par11;
-	/* there might be more stuff */
-};
-struct rfInfo_t rfinf;
-
 __attribute__((interrupt))
 void LLE_IRQHandler() {
 	gptrLLEReg[2] = 0xffffffff; // STATUS
@@ -355,7 +312,6 @@ void BLECoreInit(uint8_t TxPower) {
 	gptrBBReg = (uint32_t *)0x4000c100;
 	gptrLLEReg = (uint32_t *)0x4000c200;
 	gptrRFENDReg = (uint32_t *)0x4000d000;
-	rfcfg.rfStatusCB = RF_2G4StatusCallBack;
 	DevInit(TxPower);
 	RegInit();
 	NVIC->IPRIOR[0x15] |= 0x80;
@@ -388,48 +344,7 @@ void PHYSetTxMode(int32_t mode, size_t len) {
 	gptrLLEReg[25] = (idx + 0x9e) *2;
 }
 
-void HopChannel() {
-	uint32_t chan = rfinf.par7 + rfcfg.HopIndex & 0x1f;
-	uint32_t cnt = 0;
-	rfcfg.Channel = chan;
-	rfinf.par7 = chan;
-	if(rfcfg.ChannelMap >> chan & 1) {
-		for(uint8_t i = 0; i < 0x20; i++) {
-			if ((rfcfg.ChannelMap >> (i & 0x1f) & 1) != 0) {
-				if (chan % (uint32_t)rfinf.par11 == cnt) {
-					rfcfg.Channel = i;
-					return;
-				}
-			cnt = cnt + 1 & 0xff;
-			}
-		}
-	}
-}
-
-uint32_t FrequencyHopper() {
-	uint32_t res = 0;
-	uint32_t period = 0;
-	if(rfcfg.HopPeriod <= res) {
-		do {
-			HopChannel();
-			period = rfcfg.HopPeriod;
-			rfinf.par5 += period * 0x20;
-			res -= period;
-		} while(period <= res);
-	}
-	return res;
-}
-
 void Advertise(uint8_t adv[], size_t len, uint8_t channel) {
-	if(rfinf.par6 & 2) {
-		uint32_t hopper = 0;
-		do {
-			do {
-				hopper = FrequencyHopper();
-			} while(hopper < 16);
-		} while((uint32_t)rfcfg.HopPeriod * 0x20 - 0x10 < hopper);
-		gptrLLEReg[25] = 0x50;
-	}
 	gptrBBReg[11] = gptrBBReg[11] & 0xfffffffc | 1;
 
 	DevSetChannel(channel);
